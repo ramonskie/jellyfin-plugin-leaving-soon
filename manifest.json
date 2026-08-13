@@ -18,11 +18,11 @@
             },
             {
                 "version": "1.0.1.0",
-                "changelog": "Version 1.0.1\n- See the GitHub release notes for details.",
+                "changelog": "Version 1.0.1\n## What's Changed\n- ci: generate proper release notes for the GitHub release and manifest changelog\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.1...",
                 "targetAbi": "10.11.0.0",
                 "sourceUrl": "https://github.com/ramonskie/jellyfin-plugin-leaving-soon/releases/download/v1.0.1/Jellyfin.Plugin.LeavingSoon-1.0.1.zip",
-                "checksum": "bdee835bf0cc8ccd3e9165a0e4ef5d50",
-                "timestamp": "2026-08-13T15:01:47Z"
+                "checksum": "5e6635048cbb11d4da7ee34b0fef1f05",
+                "timestamp": "2026-08-13T15:05:17Z"
             }
         ]
     }
