@@ -141,8 +141,10 @@ jobs:
           else
             git commit -m "chore: add plugin manifest entry for v$RELEASE_VERSION"
             # Tag-triggered runs check out a detached HEAD at the tag; land the
-            # manifest update on main instead.
+            # manifest update on main instead. Discard the build-time version
+            # edit to Directory.Build.props first so the rebase has a clean tree.
             git fetch origin main
+            git checkout -- Directory.Build.props
             git rebase origin/main
             git push origin HEAD:main
           fi
