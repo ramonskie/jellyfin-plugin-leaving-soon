@@ -9,6 +9,14 @@
         "imageUrl": "https://raw.githubusercontent.com/ramonskie/jellyfin-plugin-leaving-soon/main/images/icon.svg",
         "versions": [
             {
+                "version": "1.0.6.0",
+                "changelog": "Version 1.0.6\n## What's Changed\n- fix: discard Directory.Build.props edit before manifest rebase\n- fix: correct test-connection URL in config page\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.5...v1.0.6",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/ramonskie/jellyfin-plugin-leaving-soon/releases/download/v1.0.6/Jellyfin.Plugin.LeavingSoon-1.0.6.zip",
+                "checksum": "d73c241d596c9b0e1a0ea44bfb7cae74",
+                "timestamp": "2026-08-13T20:34:29Z"
+            },
+            {
                 "version": "1.0.5.0",
                 "changelog": "Version 1.0.5\n## What's Changed\n- fix: sync assembly version with release version\n- feat: test connection per provider, rename libraries, config-friendly base path\n- add icon\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.4...v1.0.5",
                 "targetAbi": "10.11.0.0",
