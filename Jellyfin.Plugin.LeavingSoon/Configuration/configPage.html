@@ -3,6 +3,24 @@
 <head>
     <meta charset="utf-8">
     <title>Leaving Soon</title>
+    <style>
+        .providerRow {
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            background: rgba(0, 0, 0, 0.15);
+        }
+        .providerHeader {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .providerTitle {
+            font-weight: 600;
+        }
+    </style>
 </head>
 <body>
     <div id="LeavingSoonConfigPage" class="page type-interior pluginConfigurationPage"
@@ -58,8 +76,8 @@
 
                     <div class="verticalSection">
                         <h3>Providers</h3>
-                        <p>Each provider is polled for leaving-soon items. <code>oxicleanarr</code> and
-                        <code>maintainerr</code> are supported.</p>
+                        <p>Each provider is polled for leaving-soon items. <code>maintainerr</code> and
+                        <code>oxicleanarr</code> are supported.</p>
                         <div id="providerList"></div>
                         <button type="button" is="emby-button" id="btnAddProvider" class="raised">
                             <span>Add Provider</span>
@@ -80,39 +98,74 @@
                 pluginId: 'b31d2e5a-8f4e-4c6a-b7a3-2d4e5f6a7b8c'
             };
 
+            function renumberProviders(container) {
+                container.children('.providerRow').each(function (idx) {
+                    $(this).find('.providerTitle').text('Provider ' + (idx + 1));
+                });
+            }
+
             function addProviderRow(container, provider) {
                 provider = provider || {};
-                var row = $('<div class="providerRow verticalSection">' +
+                var row = $(
+                    '<div class="providerRow">' +
+                    '<div class="providerHeader">' +
+                    '<span class="providerTitle"></span>' +
+                    '<button type="button" is="emby-button" class="btnRemoveProvider raised small">' +
+                    '<span>Remove</span></button>' +
+                    '</div>' +
                     '<div class="inputContainer">' +
                     '<label class="inputLabel">Type</label>' +
                     '<select is="emby-select" class="providerType">' +
-                    '<option value="oxicleanarr">oxicleanarr</option>' +
                     '<option value="maintainerr">maintainerr</option>' +
-                    '</select></div>' +
-                    '<div class="inputContainer"><label class="inputLabel">Name</label>' +
-                    '<input is="emby-input" type="text" class="providerName" /></div>' +
-                    '<label class="checkboxContainer"><input is="emby-checkbox" type="checkbox" class="providerEnabled" checked />' +
-                    '<span>Enabled</span></label>' +
-                    '<div class="inputContainer"><label class="inputLabel">URL</label>' +
-                    '<input is="emby-input" type="text" class="providerUrl" /></div>' +
-                    '<div class="inputContainer"><label class="inputLabel">API Key</label>' +
-                    '<input is="emby-input" type="text" class="providerApiKey" /></div>' +
-                    '<div class="inputContainer"><label class="inputLabel">Include Collections</label>' +
+                    '<option value="oxicleanarr">oxicleanarr</option>' +
+                    '</select>' +
+                    '<div class="fieldDescription providerTypeHint">maintainerr has no API key; oxicleanarr uses an API key.</div>' +
+                    '</div>' +
+                    '<div class="inputContainer">' +
+                    '<label class="inputLabel">Name</label>' +
+                    '<input is="emby-input" type="text" class="providerName" />' +
+                    '</div>' +
+                    '<label class="checkboxContainer">' +
+                    '<input is="emby-checkbox" type="checkbox" class="providerEnabled" checked />' +
+                    '<span>Enabled</span>' +
+                    '</label>' +
+                    '<div class="inputContainer">' +
+                    '<label class="inputLabel">URL</label>' +
+                    '<input is="emby-input" type="text" class="providerUrl" />' +
+                    '</div>' +
+                    '<div class="inputContainer providerApiKeyContainer">' +
+                    '<label class="inputLabel">API Key</label>' +
+                    '<input is="emby-input" type="text" class="providerApiKey" />' +
+                    '</div>' +
+                    '<div class="inputContainer providerIncludeCollectionsContainer">' +
+                    '<label class="inputLabel">Include Collections</label>' +
                     '<input is="emby-input" type="text" class="providerIncludeCollections" />' +
-                    '<div class="fieldDescription">Comma-separated collection ids (Maintainerr). Empty means all.</div></div>' +
-                    '<button type="button" is="emby-button" class="btnRemoveProvider raised"><span>Remove</span></button>' +
-                    '</div>');
-                row.find('.providerType').val(provider.Type || 'oxicleanarr');
+                    '<div class="fieldDescription">Comma-separated collection ids (Maintainerr). Empty means all.</div>' +
+                    '</div>' +
+                    '</div>'
+                );
+
+                function toggleProviderFields() {
+                    var type = row.find('.providerType').val();
+                    row.find('.providerApiKeyContainer').toggle(type === 'oxicleanarr');
+                    row.find('.providerIncludeCollectionsContainer').toggle(type === 'maintainerr');
+                }
+
+                row.find('.providerType').val(provider.Type || 'maintainerr');
                 row.find('.providerName').val(provider.Name || '');
                 row.find('.providerEnabled').prop('checked', provider.Enabled !== false);
                 row.find('.providerUrl').val(provider.Url || '');
                 row.find('.providerApiKey').val(provider.ApiKey || '');
                 row.find('.providerIncludeCollections').val(provider.IncludeCollections || '');
+
+                row.find('.providerType').on('change', toggleProviderFields);
                 row.find('.btnRemoveProvider').on('click', function () {
                     row.remove();
+                    renumberProviders(container);
                 });
+                toggleProviderFields();
                 container.append(row);
-                return row;
+                renumberProviders(container);
             }
 
             function collectProviders() {
