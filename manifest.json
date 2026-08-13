@@ -18,11 +18,11 @@
             },
             {
                 "version": "1.0.1.0",
-                "changelog": "Version 1.0.1\n## What's Changed\n- ci: fetch full history so release notes include all commits since the previous tag\n- chore: add plugin manifest entry for v1.0.1\n- ci: generate proper release notes for the GitHub release and manifest changelog\n- chore: add plugin manifest entry for v1.0.1\n- ci: push manifest update to main from tag-triggered release run\n- fix: directory symlink cleanup, movie folder symlinks, and release automation\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.1...v1.0.0",
+                "changelog": "Version 1.0.1\n## What's Changed\n- fix: directory symlink cleanup, movie folder symlinks, and release automation\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.0...v1.0.1",
                 "targetAbi": "10.11.0.0",
                 "sourceUrl": "https://github.com/ramonskie/jellyfin-plugin-leaving-soon/releases/download/v1.0.1/Jellyfin.Plugin.LeavingSoon-1.0.1.zip",
-                "checksum": "0f41b07ba4992b91c3ee011afec37691",
-                "timestamp": "2026-08-13T15:07:14Z"
+                "checksum": "79c7d6171864bd4eee448bdaea2f3d04",
+                "timestamp": "2026-08-13T15:20:46Z"
             }
         ]
     }
