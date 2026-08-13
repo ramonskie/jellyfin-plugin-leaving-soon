@@ -1,7 +1,7 @@
 # jellyfin-plugin-leaving-soon
 
 A Jellyfin plugin that surfaces **scheduled-deletion media** ("leaving soon") as
-symlink-backed libraries, e.g. `Leaving Soon - Movies` and `Leaving Soon - TV Shows`.
+symlink-backed libraries, e.g. `Movies - Leaving Soon` and `Shows - Leaving Soon`.
 
 The plugin uses a **provider-pull model**: it polls one or more configured provider
 apps for media that is scheduled for deletion, then manages the symlinks, the
@@ -55,9 +55,9 @@ Edit `config.xml` in the plugin's config directory and restart Jellyfin.
 
 | Setting | Default | Description |
 |---|---|---|
-| `BasePath` | `/data/leaving-soon` | Host directory for symlinks; `movies/` and `tv/` subdirectories |
-| `MoviesLibraryName` | `Leaving Soon - Movies` | Jellyfin library name for movies |
-| `TvLibraryName` | `Leaving Soon - TV Shows` | Jellyfin library name for TV |
+| `BasePath` | `/config/leaving-soon` | Host directory for symlinks; `movies/` and `tv/` subdirectories. Defaults to the Jellyfin config volume so the container user can always write it (no chown needed) |
+| `MoviesLibraryName` | `Movies - Leaving Soon` | Jellyfin library name for movies |
+| `TvLibraryName` | `Shows - Leaving Soon` | Jellyfin library name for TV |
 | `HideWhenEmpty` | `true` | Delete empty libraries instead of showing them |
 | `SyncIntervalMinutes` | `15` | Poll interval |
 | `ForceEmptyAfterFailureCount` | `3` | Consecutive provider failures tolerated before an empty result is trusted |
@@ -96,6 +96,23 @@ Note on auth:
 
 - `GET /api/leaving-soon/status` - plugin status and configuration summary (admin auth)
 - `POST /api/leaving-soon/sync` - trigger an immediate sync (admin auth)
+- `POST /api/leaving-soon/test-connection` - test a provider's URL/auth against its
+  leaving-soon endpoint (admin auth). Accepts unsaved provider settings
+  (`Type`, `Name`, `Url`, `ApiKey`, `IncludeCollections`); the config page's
+  per-provider **Test** button uses it.
+
+## Docker
+
+The default `BasePath` is `/config/leaving-soon` (inside the Jellyfin config volume),
+so the container user can always create the symlink directories — no permission setup
+needed. If you prefer the leaving-soon libraries to live on the media mount instead,
+set `BasePath` to e.g. `/data/leaving-soon` and pre-create it with the container's
+UID/GID:
+
+```sh
+mkdir -p /data/leaving-soon/movies /data/leaving-soon/tv
+chown -R 1000:1000 /data/leaving-soon
+```
 
 ## Building
 

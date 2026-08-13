@@ -20,6 +20,15 @@
         .providerTitle {
             font-weight: 600;
         }
+        .providerActions {
+            display: flex;
+            gap: 8px;
+        }
+        .providerTestStatus {
+            margin-top: 8px;
+            font-size: 0.9em;
+            min-height: 1.2em;
+        }
     </style>
 </head>
 <body>
@@ -110,8 +119,12 @@
                     '<div class="providerRow">' +
                     '<div class="providerHeader">' +
                     '<span class="providerTitle"></span>' +
+                    '<div class="providerActions">' +
+                    '<button type="button" is="emby-button" class="btnTestProvider raised small">' +
+                    '<span>Test</span></button>' +
                     '<button type="button" is="emby-button" class="btnRemoveProvider raised small">' +
                     '<span>Remove</span></button>' +
+                    '</div>' +
                     '</div>' +
                     '<div class="inputContainer">' +
                     '<label class="inputLabel">Type</label>' +
@@ -142,6 +155,7 @@
                     '<input is="emby-input" type="text" class="providerIncludeCollections" />' +
                     '<div class="fieldDescription">Comma-separated collection ids (Maintainerr). Empty means all.</div>' +
                     '</div>' +
+                    '<div class="providerTestStatus"></div>' +
                     '</div>'
                 );
 
@@ -162,6 +176,33 @@
                 row.find('.btnRemoveProvider').on('click', function () {
                     row.remove();
                     renumberProviders(container);
+                });
+                row.find('.btnTestProvider').on('click', function () {
+                    var $btn = $(this);
+                    var $status = row.find('.providerTestStatus');
+                    $btn.prop('disabled', true);
+                    $status.text('Testing connection...').css('color', 'inherit');
+                    var payload = {
+                        Type: row.find('.providerType').val(),
+                        Name: row.find('.providerName').val(),
+                        Url: row.find('.providerUrl').val(),
+                        ApiKey: row.find('.providerApiKey').val(),
+                        IncludeCollections: row.find('.providerIncludeCollections').val()
+                    };
+                    ApiClient.fetch({
+                        url: ApiClient.getUrl('leaving-soon/test-connection'),
+                        type: 'POST',
+                        data: JSON.stringify(payload),
+                        contentType: 'application/json',
+                        dataType: 'json'
+                    }).then(function (result) {
+                        $status.text(result.Message);
+                        $status.css('color', result.Success ? '#4caf50' : '#e57373');
+                    }).catch(function () {
+                        $status.text('Test request failed. Check the server logs.').css('color', '#e57373');
+                    }).then(function () {
+                        $btn.prop('disabled', false);
+                    });
                 });
                 toggleProviderFields();
                 container.append(row);

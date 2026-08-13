@@ -25,4 +25,11 @@ public interface ILeavingSoonProvider
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The leaving-soon items; an empty list when none are scheduled.</returns>
     Task<IReadOnlyList<LeavingSoonItem>> GetLeavingSoonItemsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Validates that this provider's endpoint is reachable and responds correctly.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The connection test result.</returns>
+    Task<ProviderTestResult> TestConnectionAsync(CancellationToken cancellationToken);
 }

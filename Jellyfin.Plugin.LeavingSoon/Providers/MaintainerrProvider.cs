@@ -103,6 +103,26 @@ public sealed class MaintainerrProvider : ILeavingSoonProvider, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<ProviderTestResult> TestConnectionAsync(CancellationToken cancellationToken)
+    {
+        var url = new Uri($"{_config.Url.TrimEnd('/')}/api/collections/leaving-soon");
+        try
+        {
+            using var response = await _httpClient.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+            var payload = JsonSerializer.Deserialize<MaintainerrLeavingSoonResponse>(content, JsonDefaults.Options);
+            var count = payload?.Collections?.Sum(c => c.Media.Count) ?? 0;
+            return new ProviderTestResult(true, $"Connected. {count} scheduled-deletion media item(s) found.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Test connection to Maintainerr '{Provider}' failed", Name);
+            return new ProviderTestResult(false, ex.Message);
+        }
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         _httpClient.Dispose();

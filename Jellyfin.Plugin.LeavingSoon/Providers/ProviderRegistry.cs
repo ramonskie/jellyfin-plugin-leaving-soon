@@ -28,6 +28,34 @@ public class ProviderRegistry
     }
 
     /// <summary>
+    /// Builds a single provider from the given configuration, regardless of the
+    /// Enabled flag. Used for connection tests on unsaved config.
+    /// </summary>
+    /// <param name="providerConfig">The provider configuration.</param>
+    /// <returns>The provider, or <c>null</c> when the type is unknown.</returns>
+    public ILeavingSoonProvider? BuildProvider(ProviderConfig providerConfig)
+    {
+        try
+        {
+            return providerConfig.Type.ToUpperInvariant() switch
+            {
+                "MAINTAINERR" => new MaintainerrProvider(
+                    providerConfig,
+                    _loggerFactory.CreateLogger<MaintainerrProvider>()),
+                "OXICLEANARR" => new OxiCleanarrProvider(
+                    providerConfig,
+                    _loggerFactory.CreateLogger<OxiCleanarrProvider>()),
+                _ => null,
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to build provider '{Name}'", providerConfig.Name);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Builds the enabled providers from the plugin configuration.
     /// </summary>
     /// <param name="config">The plugin configuration.</param>
@@ -43,31 +71,17 @@ public class ProviderRegistry
                 continue;
             }
 
-            try
+            var provider = BuildProvider(providerConfig);
+            if (provider != null)
             {
-                switch (providerConfig.Type.ToUpperInvariant())
-                {
-                    case "MAINTAINERR":
-                        providers.Add(new MaintainerrProvider(
-                            providerConfig,
-                            _loggerFactory.CreateLogger<MaintainerrProvider>()));
-                        break;
-                    case "OXICLEANARR":
-                        providers.Add(new OxiCleanarrProvider(
-                            providerConfig,
-                            _loggerFactory.CreateLogger<OxiCleanarrProvider>()));
-                        break;
-                    default:
-                        _logger.LogWarning(
-                            "Ignoring provider '{Name}' with unknown type '{Type}'",
-                            providerConfig.Name,
-                            providerConfig.Type);
-                        break;
-                }
+                providers.Add(provider);
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError(ex, "Failed to build provider '{Name}'", providerConfig.Name);
+                _logger.LogWarning(
+                    "Ignoring provider '{Name}' with unknown type '{Type}'",
+                    providerConfig.Name,
+                    providerConfig.Type);
             }
         }
 

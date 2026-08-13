@@ -13,9 +13,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public PluginConfiguration()
     {
-        BasePath = "/data/leaving-soon";
-        MoviesLibraryName = "Leaving Soon - Movies";
-        TvLibraryName = "Leaving Soon - TV Shows";
+        BasePath = "/config/leaving-soon";
+        MoviesLibraryName = "Movies - Leaving Soon";
+        TvLibraryName = "Shows - Leaving Soon";
         HideWhenEmpty = true;
         SyncIntervalMinutes = 15;
         Providers = [];

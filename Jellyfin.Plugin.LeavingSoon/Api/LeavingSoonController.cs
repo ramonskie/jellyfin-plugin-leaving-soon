@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.LeavingSoon.Configuration;
+using Jellyfin.Plugin.LeavingSoon.Providers;
 using Jellyfin.Plugin.LeavingSoon.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -22,16 +23,22 @@ public class LeavingSoonController : ControllerBase
 {
     private readonly ILogger<LeavingSoonController> _logger;
     private readonly SyncService _syncService;
+    private readonly ProviderRegistry _providerRegistry;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LeavingSoonController"/> class.
     /// </summary>
     /// <param name="logger">The logger.</param>
     /// <param name="syncService">The sync service.</param>
-    public LeavingSoonController(ILogger<LeavingSoonController> logger, SyncService syncService)
+    /// <param name="providerRegistry">The provider registry.</param>
+    public LeavingSoonController(
+        ILogger<LeavingSoonController> logger,
+        SyncService syncService,
+        ProviderRegistry providerRegistry)
     {
         _logger = logger;
         _syncService = syncService;
+        _providerRegistry = providerRegistry;
     }
 
     /// <summary>
@@ -69,6 +76,63 @@ public class LeavingSoonController : ControllerBase
         // Fire-and-forget with a progress reporter that does nothing.
         _ = Task.Run(() => _syncService.ExecuteAsync(new System.Progress<double>(), CancellationToken.None));
         return Accepted();
+    }
+
+    /// <summary>
+    /// Tests connectivity to a provider using the supplied (possibly unsaved) settings.
+    /// </summary>
+    /// <param name="request">The provider settings to test.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The connection test result.</returns>
+    [HttpPost("test-connection")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<TestConnectionResponse>> TestConnection(
+        [FromBody] TestConnectionRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Type) || string.IsNullOrWhiteSpace(request.Url))
+        {
+            return BadRequest(new TestConnectionResponse
+            {
+                Success = false,
+                Message = "Type and Url are required.",
+            });
+        }
+
+        var providerConfig = new ProviderConfig
+        {
+            Type = request.Type,
+            Name = request.Name,
+            Url = request.Url,
+            ApiKey = request.ApiKey,
+            IncludeCollections = request.IncludeCollections,
+        };
+
+        var provider = _providerRegistry.BuildProvider(providerConfig);
+        if (provider == null)
+        {
+            return BadRequest(new TestConnectionResponse
+            {
+                Success = false,
+                Message = $"Unknown provider type '{request.Type}'.",
+            });
+        }
+
+        using (provider as IDisposable)
+        {
+            var result = await provider.TestConnectionAsync(cancellationToken);
+            _logger.LogInformation(
+                "Connection test for provider '{Provider}' ({Type}): {Outcome}",
+                provider.Name,
+                provider.Type,
+                result.Success ? "success" : "failed");
+            return Ok(new TestConnectionResponse
+            {
+                Success = result.Success,
+                Message = result.Message,
+            });
+        }
     }
 }
 
@@ -116,4 +180,55 @@ public class StatusResponse
     /// Gets or sets the sync interval in minutes.
     /// </summary>
     public int SyncIntervalMinutes { get; set; }
+}
+
+/// <summary>
+/// Request model for testing a provider connection.
+/// </summary>
+public class TestConnectionRequest
+{
+    /// <summary>
+    /// Gets or sets the provider kind ("maintainerr" or "oxicleanarr").
+    /// </summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the provider display name.
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the provider base URL.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1056:Uri properties should not be strings",
+        Justification = "Mirrors ProviderConfig.Url; kept as a string so the config page can send unsaved values.")]
+    public string Url { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the optional API key.
+    /// </summary>
+    public string ApiKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the optional comma-separated collection ids.
+    /// </summary>
+    public string IncludeCollections { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Response model for a provider connection test.
+/// </summary>
+public class TestConnectionResponse
+{
+    /// <summary>
+    /// Gets or sets a value indicating whether the connection test succeeded.
+    /// </summary>
+    public bool Success { get; set; }
+
+    /// <summary>
+    /// Gets or sets a human-readable description of the outcome.
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
 }
