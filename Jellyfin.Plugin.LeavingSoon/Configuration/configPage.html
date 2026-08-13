@@ -5,42 +5,173 @@
     <title>Leaving Soon</title>
 </head>
 <body>
-    <div id="LeavingSoonConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+    <div id="LeavingSoonConfigPage" class="page type-interior pluginConfigurationPage"
+        data-require="emby-input,emby-button,emby-select,emby-checkbox" data-role="page">
         <div data-role="content">
             <div class="content-primary">
-                <div class="verticalSection">
-                    <h2>Leaving Soon</h2>
-                    <p>Surfaces scheduled-deletion media as symlink-backed libraries in Jellyfin.</p>
-                    <p>The plugin polls one or more provider apps for "leaving soon" media and
-                    manages the symlinks, the virtual folders, and the library refreshes itself.</p>
-                </div>
+                <form id="LeavingSoonConfigForm" class="LeavingSoonConfigurationForm">
+                    <div class="verticalSection">
+                        <h2>Leaving Soon</h2>
+                        <p>Surfaces scheduled-deletion media as symlink-backed libraries in Jellyfin.
+                        The plugin polls one or more provider apps and manages the symlinks, the
+                        virtual folders, and the library refreshes itself.</p>
+                    </div>
 
-                <div class="verticalSection">
-                    <h3>Configuration</h3>
-                    <p>Edit <code>config.xml</code> in this plugin's config directory and restart Jellyfin.
-                    The web UI for this plugin is read-only.</p>
-                    <p>Key settings:</p>
-                    <ul>
-                        <li><code>BasePath</code> - host directory for symlinks (movies and tv subdirectories)</li>
-                        <li><code>MoviesLibraryName</code> / <code>TvLibraryName</code> - Jellyfin library names</li>
-                        <li><code>HideWhenEmpty</code> - delete empty libraries instead of showing them</li>
-                        <li><code>SyncIntervalMinutes</code> - poll interval</li>
-                        <li><code>Providers</code> - list of <code>maintainerr</code> and/or <code>oxicleanarr</code> sources</li>
-                    </ul>
-                </div>
+                    <div class="verticalSection">
+                        <h3>Libraries</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel" for="txtBasePath">Base Path</label>
+                            <input id="txtBasePath" type="text" is="emby-input" />
+                            <div class="fieldDescription">Host directory for symlinks. The plugin creates
+                            <code>movies</code> and <code>tv</code> subdirectories under it.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel" for="txtMoviesLibraryName">Movies Library Name</label>
+                            <input id="txtMoviesLibraryName" type="text" is="emby-input" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel" for="txtTvLibraryName">TV Library Name</label>
+                            <input id="txtTvLibraryName" type="text" is="emby-input" />
+                        </div>
+                        <label class="checkboxContainer">
+                            <input id="chkHideWhenEmpty" type="checkbox" is="emby-checkbox" />
+                            <span>Hide libraries when empty</span>
+                        </label>
+                        <div class="fieldDescription">Delete empty libraries instead of showing them in the sidebar.</div>
+                    </div>
 
-                <div class="verticalSection">
-                    <h3>How it works</h3>
-                    <ol>
-                        <li>On the configured interval the plugin polls every enabled provider.</li>
-                        <li>Each provider returns the normalized leaving-soon contract
-                        (<code>mediaServerId</code>, <code>type</code>, <code>deletionDate</code>).</li>
-                        <li>The plugin resolves each item's on-disk path from Jellyfin's own metadata.</li>
-                        <li>It reconciles the symlinks, virtual folders, and refreshes the libraries.</li>
-                    </ol>
-                </div>
+                    <div class="verticalSection">
+                        <h3>Sync</h3>
+                        <div class="inputContainer">
+                            <label class="inputLabel" for="txtSyncIntervalMinutes">Sync Interval (minutes)</label>
+                            <input id="txtSyncIntervalMinutes" type="number" is="emby-input" min="1" />
+                            <div class="fieldDescription">How often to poll the providers.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel" for="txtForceEmptyAfterFailureCount">Empty After Failure Count</label>
+                            <input id="txtForceEmptyAfterFailureCount" type="number" is="emby-input" min="1" />
+                            <div class="fieldDescription">Consecutive provider failures tolerated before an empty
+                            result is treated as authoritative (so a temporarily-down provider doesn't wipe the
+                            libraries).</div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
+                        <h3>Providers</h3>
+                        <p>Each provider is polled for leaving-soon items. <code>oxicleanarr</code> and
+                        <code>maintainerr</code> are supported.</p>
+                        <div id="providerList"></div>
+                        <button type="button" is="emby-button" id="btnAddProvider" class="raised">
+                            <span>Add Provider</span>
+                        </button>
+                    </div>
+
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
+
+        <script type="text/javascript">
+            var LeavingSoonConfig = {
+                pluginId: 'b31d2e5a-8f4e-4c6a-b7a3-2d4e5f6a7b8c'
+            };
+
+            function addProviderRow(container, provider) {
+                provider = provider || {};
+                var row = $('<div class="providerRow verticalSection">' +
+                    '<div class="inputContainer">' +
+                    '<label class="inputLabel">Type</label>' +
+                    '<select is="emby-select" class="providerType">' +
+                    '<option value="oxicleanarr">oxicleanarr</option>' +
+                    '<option value="maintainerr">maintainerr</option>' +
+                    '</select></div>' +
+                    '<div class="inputContainer"><label class="inputLabel">Name</label>' +
+                    '<input is="emby-input" type="text" class="providerName" /></div>' +
+                    '<label class="checkboxContainer"><input is="emby-checkbox" type="checkbox" class="providerEnabled" checked />' +
+                    '<span>Enabled</span></label>' +
+                    '<div class="inputContainer"><label class="inputLabel">URL</label>' +
+                    '<input is="emby-input" type="text" class="providerUrl" /></div>' +
+                    '<div class="inputContainer"><label class="inputLabel">API Key</label>' +
+                    '<input is="emby-input" type="text" class="providerApiKey" /></div>' +
+                    '<div class="inputContainer"><label class="inputLabel">Include Collections</label>' +
+                    '<input is="emby-input" type="text" class="providerIncludeCollections" />' +
+                    '<div class="fieldDescription">Comma-separated collection ids (Maintainerr). Empty means all.</div></div>' +
+                    '<button type="button" is="emby-button" class="btnRemoveProvider raised"><span>Remove</span></button>' +
+                    '</div>');
+                row.find('.providerType').val(provider.Type || 'oxicleanarr');
+                row.find('.providerName').val(provider.Name || '');
+                row.find('.providerEnabled').prop('checked', provider.Enabled !== false);
+                row.find('.providerUrl').val(provider.Url || '');
+                row.find('.providerApiKey').val(provider.ApiKey || '');
+                row.find('.providerIncludeCollections').val(provider.IncludeCollections || '');
+                row.find('.btnRemoveProvider').on('click', function () {
+                    row.remove();
+                });
+                container.append(row);
+                return row;
+            }
+
+            function collectProviders() {
+                var providers = [];
+                $('#providerList .providerRow').each(function () {
+                    var $row = $(this);
+                    providers.push({
+                        Type: $row.find('.providerType').val(),
+                        Name: $row.find('.providerName').val(),
+                        Enabled: $row.find('.providerEnabled').prop('checked'),
+                        Url: $row.find('.providerUrl').val(),
+                        ApiKey: $row.find('.providerApiKey').val(),
+                        IncludeCollections: $row.find('.providerIncludeCollections').val()
+                    });
+                });
+                return providers;
+            }
+
+            $('#LeavingSoonConfigPage').on('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(LeavingSoonConfig.pluginId).then(function (config) {
+                    $('#txtBasePath').val(config.BasePath || '');
+                    $('#txtMoviesLibraryName').val(config.MoviesLibraryName || '');
+                    $('#txtTvLibraryName').val(config.TvLibraryName || '');
+                    $('#chkHideWhenEmpty').prop('checked', !!config.HideWhenEmpty);
+                    $('#txtSyncIntervalMinutes').val(config.SyncIntervalMinutes || 15);
+                    $('#txtForceEmptyAfterFailureCount').val(config.ForceEmptyAfterFailureCount || 3);
+
+                    $('#providerList').empty();
+                    var providers = config.Providers || [];
+                    for (var i = 0; i < providers.length; i++) {
+                        addProviderRow($('#providerList'), providers[i]);
+                    }
+
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+            $('#btnAddProvider').on('click', function () {
+                addProviderRow($('#providerList'), {});
+            });
+
+            $('.LeavingSoonConfigurationForm').on('submit', function (e) {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(LeavingSoonConfig.pluginId).then(function (config) {
+                    config.BasePath = $('#txtBasePath').val();
+                    config.MoviesLibraryName = $('#txtMoviesLibraryName').val();
+                    config.TvLibraryName = $('#txtTvLibraryName').val();
+                    config.HideWhenEmpty = $('#chkHideWhenEmpty').prop('checked');
+                    config.SyncIntervalMinutes = parseInt($('#txtSyncIntervalMinutes').val(), 10) || 15;
+                    config.ForceEmptyAfterFailureCount = parseInt($('#txtForceEmptyAfterFailureCount').val(), 10) || 3;
+                    config.Providers = collectProviders();
+                    ApiClient.updatePluginConfiguration(LeavingSoonConfig.pluginId, config)
+                        .then(Dashboard.processPluginConfigurationUpdateResult);
+                });
+                e.preventDefault();
+                return false;
+            });
+        </script>
     </div>
 </body>
 </html>
