@@ -190,7 +190,7 @@
                         IncludeCollections: row.find('.providerIncludeCollections').val()
                     };
                     ApiClient.fetch({
-                        url: ApiClient.getUrl('leaving-soon/test-connection'),
+                        url: ApiClient.getUrl('api/leaving-soon/test-connection'),
                         type: 'POST',
                         data: JSON.stringify(payload),
                         contentType: 'application/json',
