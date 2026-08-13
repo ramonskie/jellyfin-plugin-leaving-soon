@@ -2,6 +2,10 @@ name: 'Build & Release'
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g. 1.0.5)'
+        required: true
   push:
     tags:
       - 'v*'
@@ -21,24 +25,45 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Resolved version: $VERSION"
+
+      - name: Sync assembly version with release version
+        run: |
+          # Ensure the DLL assembly version matches the release version so the
+          # manifest version and assembly version never drift. Jellyfin compares
+          # the assembly version against the manifest version when
+          # uninstalling/updating; a mismatch breaks those flows.
+          VERSION="${{ steps.version.outputs.version }}"
+          # Normalize to 4-part version (1.0.5 -> 1.0.5.0) for .NET assembly attributes
+          if [[ "$VERSION" != *.*.*.* ]]; then
+            VERSION="${VERSION}.0"
+          fi
+          sed -i "s|<Version>[^<]*</Version>|<Version>${VERSION}</Version>|" Directory.Build.props
+          sed -i "s|<AssemblyVersion>[^<]*</AssemblyVersion>|<AssemblyVersion>${VERSION}</AssemblyVersion>|" Directory.Build.props
+          sed -i "s|<FileVersion>[^<]*</FileVersion>|<FileVersion>${VERSION}</FileVersion>|" Directory.Build.props
+          echo "Synced assembly version to ${VERSION}"
+          cat Directory.Build.props
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
-      - name: Set release version
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            VERSION="0.0.0"
-          fi
-          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
-
       - name: Restore dependencies
         run: dotnet restore
 
       - name: Build plugin
-        run: dotnet build --configuration Release --no-restore -p:Version="$RELEASE_VERSION.0"
+        run: dotnet build --configuration Release --no-restore
 
       - name: Run unit tests
         run: dotnet test --configuration Release --no-restore
