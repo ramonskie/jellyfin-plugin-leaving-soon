@@ -15,6 +15,10 @@ namespace Jellyfin.Plugin.LeavingSoon.Services;
 /// <summary>
 /// Polls all configured providers and reconciles the leaving-soon symlink libraries.
 /// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "Singleton registered in the DI container; the sync semaphore lives for the process lifetime.")]
 public class SyncService : IScheduledTask
 {
     private const string MoviesSubDir = "movies";
@@ -25,6 +29,10 @@ public class SyncService : IScheduledTask
     private readonly VirtualFolderManager _virtualFolderManager;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<SyncService> _logger;
+
+    // Serializes sync executions so overlapping manual/scheduled syncs can't race
+    // the symlink reconciliation (e.g. an exclude + re-include pair).
+    private readonly SemaphoreSlim _syncLock = new(1, 1);
 
     private int _consecutiveProviderFailures;
 
@@ -62,6 +70,30 @@ public class SyncService : IScheduledTask
     /// <inheritdoc />
     public string Category => "Leaving Soon";
 
+    /// <summary>
+    /// Resolves the path to symlink for an item. Movies resolve to the media file;
+    /// the containing folder is used instead so the leaving-soon library shows the
+    /// whole movie folder, consistent with shows (which resolve to their series
+    /// folder and contain Season subdirectories). Only the folder is used when it is
+    /// a dedicated movie folder (no subdirectories) — a flat movie in a library root
+    /// falls back to a file symlink to avoid symlinking the entire library.
+    /// </summary>
+    /// <param name="sourcePath">The Jellyfin-resolved item path.</param>
+    /// <returns>The path to symlink (a folder for movies in their own folder, otherwise unchanged).</returns>
+    public static string ResolveLinkSource(string sourcePath)
+    {
+        if (File.Exists(sourcePath))
+        {
+            var movieDir = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrEmpty(movieDir) && Directory.GetDirectories(movieDir).Length == 0)
+            {
+                return movieDir;
+            }
+        }
+
+        return sourcePath;
+    }
+
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
@@ -78,6 +110,19 @@ public class SyncService : IScheduledTask
 
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        await _syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await ExecuteCoreAsync(progress, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _syncLock.Release();
+        }
+    }
+
+    private async Task ExecuteCoreAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration;
         if (config == null)
@@ -151,30 +196,6 @@ public class SyncService : IScheduledTask
             cancellationToken).ConfigureAwait(false);
 
         progress.Report(100);
-    }
-
-    /// <summary>
-    /// Resolves the path to symlink for an item. Movies resolve to the media file;
-    /// the containing folder is used instead so the leaving-soon library shows the
-    /// whole movie folder, consistent with shows (which resolve to their series
-    /// folder and contain Season subdirectories). Only the folder is used when it is
-    /// a dedicated movie folder (no subdirectories) — a flat movie in a library root
-    /// falls back to a file symlink to avoid symlinking the entire library.
-    /// </summary>
-    /// <param name="sourcePath">The Jellyfin-resolved item path.</param>
-    /// <returns>The path to symlink (a folder for movies in their own folder, otherwise unchanged).</returns>
-    internal static string ResolveLinkSource(string sourcePath)
-    {
-        if (File.Exists(sourcePath))
-        {
-            var movieDir = Path.GetDirectoryName(sourcePath);
-            if (!string.IsNullOrEmpty(movieDir) && Directory.GetDirectories(movieDir).Length == 0)
-            {
-                return movieDir;
-            }
-        }
-
-        return sourcePath;
     }
 
     private async Task SyncLibraryAsync(
