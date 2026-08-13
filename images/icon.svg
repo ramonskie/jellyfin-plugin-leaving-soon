@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#00a4dc"/>
+      <stop offset="1" stop-color="#0b67a8"/>
+    </linearGradient>
+    <linearGradient id="clock" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e3f2fb"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="96" fill="url(#bg)"/>
+
+  <g transform="translate(256 256)">
+    <circle r="168" fill="none" stroke="#ffffff" stroke-width="24" opacity="0.25"/>
+    <circle r="150" fill="none" stroke="url(#clock)" stroke-width="20"/>
+    <circle r="150" fill="none" stroke="#ffffff" stroke-width="6" opacity="0.35" stroke-dasharray="2 22" stroke-linecap="round"/>
+
+    <g stroke="#0b67a8" stroke-width="20" stroke-linecap="round">
+      <line x1="0" y1="0" x2="0" y2="-96"/>
+      <line x1="0" y1="0" x2="66" y2="-52"/>
+    </g>
+    <circle r="14" fill="#0b67a8"/>
+
+    <path d="M 104 96 L 148 52" stroke="#0b67a8" stroke-width="20" stroke-linecap="round" fill="none"/>
+    <path d="M 148 52 L 148 104 M 148 52 L 96 52" stroke="#ffffff" stroke-width="18" stroke-linecap="round" fill="none" opacity="0.9"/>
+  </g>
+</svg>
