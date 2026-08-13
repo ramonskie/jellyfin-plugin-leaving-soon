@@ -94,7 +94,12 @@ jobs:
               "checksum": checksum,
               "timestamp": ts,
           })
-          entry["versions"].sort(key=lambda v: v["version"])
+          # Jellyfin expects the newest version first, sorted numerically
+          # (lexicographic would misorder e.g. 1.0.10 vs 1.0.2).
+          def _ver_key(v):
+              import re
+              return [int(x) for x in re.findall(r'\d+', v["version"])]
+          entry["versions"].sort(key=_ver_key, reverse=True)
           with open('manifest.json', 'w') as f:
               json.dump(manifest, f, indent=4)
               f.write("\n")
