@@ -153,7 +153,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: /tmp/release-notes.md
-          update_existing_release: true
+          overwrite_files: true
           files: |
             Jellyfin.Plugin.LeavingSoon-*.zip
             Jellyfin.Plugin.LeavingSoon-*.zip.md5
