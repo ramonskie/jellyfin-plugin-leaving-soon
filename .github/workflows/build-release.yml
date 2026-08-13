@@ -52,6 +52,21 @@ jobs:
           cd ..
           md5sum "Jellyfin.Plugin.LeavingSoon-${{ env.RELEASE_VERSION }}.zip" > "Jellyfin.Plugin.LeavingSoon-${{ env.RELEASE_VERSION }}.zip.md5"
 
+      - name: Generate release notes
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)
+          {
+            echo "## What's Changed"
+            if [ -n "$PREV_TAG" ]; then
+              git log --pretty=format:"- %s" "$PREV_TAG"..HEAD | grep -v -E '^(chore|ci|docs|Merge)' || true
+            else
+              git log --pretty=format:"- %s" | grep -v -E '^(chore|ci|docs|Merge)' || true
+            fi
+          } > /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
+          echo "**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/${{ github.ref_name }}...$PREV_TAG" >> /tmp/release-notes.md
+          cat /tmp/release-notes.md
+
       - name: Update plugin manifest
         env:
           RELEASE_TAG: "${{ github.ref_name }}"
@@ -64,9 +79,11 @@ jobs:
           manifest_version = version + ".0"
           with open('manifest.json') as f:
               manifest = json.load(f)
+          with open('/tmp/release-notes.md') as f:
+              notes = f.read().strip()
           entry = manifest[0]
           source_url = f"https://github.com/ramonskie/jellyfin-plugin-leaving-soon/releases/download/{tag}/Jellyfin.Plugin.LeavingSoon-{version}.zip"
-          changelog = f"Version {version}\n- See the GitHub release notes for details."
+          changelog = f"Version {version}\n{notes}"
           entry["versions"] = [v for v in entry["versions"] if v["version"] != manifest_version]
           entry["versions"].append({
               "version": manifest_version,
@@ -102,6 +119,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: /tmp/release-notes.md
+          update_existing_release: true
           files: |
             Jellyfin.Plugin.LeavingSoon-*.zip
             Jellyfin.Plugin.LeavingSoon-*.zip.md5
