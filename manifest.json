@@ -9,6 +9,14 @@
         "imageUrl": "https://raw.githubusercontent.com/ramonskie/jellyfin-plugin-leaving-soon/main/images/icon.svg",
         "versions": [
             {
+                "version": "1.0.3.0",
+                "changelog": "Version 1.0.3\n## What's Changed\n- feat: editable configuration page for the Leaving Soon plugin\n- fix: order plugin manifest versions newest-first\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.2...v1.0.3",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/ramonskie/jellyfin-plugin-leaving-soon/releases/download/v1.0.3/Jellyfin.Plugin.LeavingSoon-1.0.3.zip",
+                "checksum": "158495adf58c6dd614ff5eb20adcebe0",
+                "timestamp": "2026-08-13T18:29:07Z"
+            },
+            {
                 "version": "1.0.2.0",
                 "changelog": "Version 1.0.2\n## What's Changed\n- fix: serialize sync executions so overlapping syncs can't race symlink reconciliation\n\n**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/v1.0.1...v1.0.2",
                 "targetAbi": "10.11.0.0",
