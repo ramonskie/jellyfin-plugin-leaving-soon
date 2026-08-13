@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Leaving Soon</title>
+</head>
+<body>
+    <div id="LeavingSoonConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+        <div data-role="content">
+            <div class="content-primary">
+                <div class="verticalSection">
+                    <h2>Leaving Soon</h2>
+                    <p>Surfaces scheduled-deletion media as symlink-backed libraries in Jellyfin.</p>
+                    <p>The plugin polls one or more provider apps for "leaving soon" media and
+                    manages the symlinks, the virtual folders, and the library refreshes itself.</p>
+                </div>
+
+                <div class="verticalSection">
+                    <h3>Configuration</h3>
+                    <p>Edit <code>config.xml</code> in this plugin's config directory and restart Jellyfin.
+                    The web UI for this plugin is read-only.</p>
+                    <p>Key settings:</p>
+                    <ul>
+                        <li><code>BasePath</code> - host directory for symlinks (movies and tv subdirectories)</li>
+                        <li><code>MoviesLibraryName</code> / <code>TvLibraryName</code> - Jellyfin library names</li>
+                        <li><code>HideWhenEmpty</code> - delete empty libraries instead of showing them</li>
+                        <li><code>SyncIntervalMinutes</code> - poll interval</li>
+                        <li><code>Providers</code> - list of <code>maintainerr</code> and/or <code>oxicleanarr</code> sources</li>
+                    </ul>
+                </div>
+
+                <div class="verticalSection">
+                    <h3>How it works</h3>
+                    <ol>
+                        <li>On the configured interval the plugin polls every enabled provider.</li>
+                        <li>Each provider returns the normalized leaving-soon contract
+                        (<code>mediaServerId</code>, <code>type</code>, <code>deletionDate</code>).</li>
+                        <li>The plugin resolves each item's on-disk path from Jellyfin's own metadata.</li>
+                        <li>It reconciles the symlinks, virtual folders, and refreshes the libraries.</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

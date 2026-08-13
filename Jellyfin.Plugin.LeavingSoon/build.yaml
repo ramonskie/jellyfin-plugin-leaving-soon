@@ -1,0 +1,22 @@
+---
+name: "Leaving Soon"
+guid: "b31d2e5a-8f4e-4c6a-b7a3-2d4e5f6a7b8c"
+version: "1.0.0"
+targetAbi: "10.11.0.0"
+framework: "net9.0"
+overview: "Surfaces scheduled-deletion media as symlink-backed leaving-soon libraries in Jellyfin."
+description: "Polls provider apps (Maintainerr, OxiCleanarr, future sources) for scheduled-deletion media and manages symlink libraries, virtual folders, and refreshes itself. Provider-pull model - no push integration needed."
+category: "General"
+owner: "ramonskie"
+changelog: |
+  Version 1.0.0 - Initial release
+  - Provider-pull architecture: polls Maintainerr and OxiCleanarr leaving-soon endpoints
+  - Normalized leaving-soon contract (mediaServerId, type, deletionDate)
+  - Resolves on-disk paths from Jellyfin's own metadata
+  - Manages symlinks, virtual folders, and library refreshes in-process
+  - hide-when-empty with Jellyfin double-refresh for user views
+artifacts:
+  - "Jellyfin.Plugin.LeavingSoon.dll"
+build_type: "dotnet"
+dotnet_configuration: "Release"
+dotnet_framework: "net9.0"

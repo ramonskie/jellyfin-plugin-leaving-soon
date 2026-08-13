@@ -1,0 +1,72 @@
+name: 'Test Plugin'
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**/*.md'
+      - 'images/**'
+  pull_request:
+    branches: [ main, master ]
+    paths-ignore:
+      - '**/*.md'
+      - 'images/**'
+
+jobs:
+  test:
+    name: Test Plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build plugin
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Run code analysis
+        run: dotnet build --configuration Release --no-restore /warnaserror
+
+      - name: Check formatting
+        run: dotnet format --verify-no-changes --no-restore
+
+  build-test:
+    name: Build & Package Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Build plugin in Release mode
+        run: dotnet build --configuration Release Jellyfin.Plugin.LeavingSoon/Jellyfin.Plugin.LeavingSoon.csproj
+
+      - name: Publish plugin
+        run: dotnet publish --configuration Release --output=artifacts Jellyfin.Plugin.LeavingSoon/Jellyfin.Plugin.LeavingSoon.csproj
+
+      - name: Verify DLL exists
+        run: |
+          if [ ! -f artifacts/Jellyfin.Plugin.LeavingSoon.dll ]; then
+            echo "ERROR: Plugin DLL not created"
+            exit 1
+          fi
+          echo "Plugin built and published successfully"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: leaving-soon-test
+          path: artifacts/Jellyfin.Plugin.LeavingSoon.dll

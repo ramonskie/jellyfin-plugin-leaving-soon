@@ -1,0 +1,44 @@
+name: 'Build & Release'
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build plugin
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish plugin
+        run: dotnet publish --configuration Release --no-restore --output=artifacts Jellyfin.Plugin.LeavingSoon/Jellyfin.Plugin.LeavingSoon.csproj
+
+      - name: Package release
+        run: |
+          cd artifacts
+          zip -r ../Jellyfin.Plugin.LeavingSoon-${{ github.ref_name }}.zip Jellyfin.Plugin.LeavingSoon.dll
+          cd ..
+          md5sum "Jellyfin.Plugin.LeavingSoon-${{ github.ref_name }}.zip" > "Jellyfin.Plugin.LeavingSoon-${{ github.ref_name }}.zip.md5"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Jellyfin.Plugin.LeavingSoon-*.zip
+            Jellyfin.Plugin.LeavingSoon-*.zip.md5

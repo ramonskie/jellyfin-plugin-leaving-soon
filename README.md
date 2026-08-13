@@ -1,0 +1,111 @@
+# jellyfin-plugin-leaving-soon
+
+A Jellyfin plugin that surfaces **scheduled-deletion media** ("leaving soon") as
+symlink-backed libraries, e.g. `Leaving Soon - Movies` and `Leaving Soon - TV Shows`.
+
+The plugin uses a **provider-pull model**: it polls one or more configured provider
+apps for media that is scheduled for deletion, then manages the symlinks, the
+Jellyfin virtual folders, and the library refreshes itself. No push integration
+is needed on the provider side.
+
+## Supported providers
+
+| Provider | Endpoint polled | Notes |
+|---|---|---|
+| Maintainerr | `GET /api/collections/leaving-soon` | New endpoint added alongside `overlay-data` |
+| OxiCleanarr | `GET /api/media/leaving-soon` | Normalized leaving-soon contract |
+
+Both return the same normalized contract:
+
+```jsonc
+{
+  "items": [
+    {
+      "mediaServerId": "jellyfin-item-guid",
+      "type": "movie" | "show",
+      "title": "The Matrix",
+      "deletionDate": "2026-09-01T00:00:00Z"
+    }
+  ]
+}
+```
+
+The plugin resolves each item's on-disk path from Jellyfin's own metadata
+(`ILibraryManager.GetItemById`), so providers do not need to expose file paths.
+
+## How it works
+
+1. On the configured interval (`SyncIntervalMinutes`, default 15) the plugin polls
+   every enabled provider.
+2. Items are deduped by `mediaServerId`; a provider that fails contributes nothing
+   and is logged (it never aborts the sync).
+3. Movies and shows are reconciled separately:
+   - ensure the host directory exists under `BasePath`,
+   - ensure the Jellyfin virtual folder exists (create or add path),
+   - create symlinks for newly-scheduled items,
+   - remove stale symlinks no longer scheduled,
+   - trigger a library refresh.
+4. `HideWhenEmpty`: when a library has zero items it is cleaned, the virtual folder
+   is deleted, and a **double refresh ~5s apart** runs so Jellyfin updates its user
+   views (the empirically-confirmed behavior from OxiCleanarr).
+
+## Configuration
+
+Edit `config.xml` in the plugin's config directory and restart Jellyfin.
+
+| Setting | Default | Description |
+|---|---|---|
+| `BasePath` | `/data/leaving-soon` | Host directory for symlinks; `movies/` and `tv/` subdirectories |
+| `MoviesLibraryName` | `Leaving Soon - Movies` | Jellyfin library name for movies |
+| `TvLibraryName` | `Leaving Soon - TV Shows` | Jellyfin library name for TV |
+| `HideWhenEmpty` | `true` | Delete empty libraries instead of showing them |
+| `SyncIntervalMinutes` | `15` | Poll interval |
+| `ForceEmptyAfterFailureCount` | `3` | Consecutive provider failures tolerated before an empty result is trusted |
+| `Providers` | `[]` | List of provider configs (`Type`, `Name`, `Enabled`, `Url`, `ApiKey`, `IncludeCollections`) |
+
+Example provider configs:
+
+```xml
+<Providers>
+  <ProviderConfig>
+    <Type>maintainerr</Type>
+    <Name>maintainerr</Name>
+    <Enabled>true</Enabled>
+    <Url>http://maintainerr:6246</Url>
+    <ApiKey></ApiKey>
+    <IncludeCollections></IncludeCollections>
+  </ProviderConfig>
+  <ProviderConfig>
+    <Type>oxicleanarr</Type>
+    <Name>oxicleanarr</Name>
+    <Enabled>true</Enabled>
+    <Url>http://oxicleanarr:9709</Url>
+    <ApiKey></ApiKey>
+    <IncludeCollections></IncludeCollections>
+  </ProviderConfig>
+</Providers>
+```
+
+Note on auth:
+- Maintainerr's collections API currently has no enforced auth.
+- OxiCleanarr's `/api/media/leaving-soon` sits behind JWT auth; the plugin works with
+  `admin.disable_auth: true`, or you may add API-key support later and send it via
+  `ApiKey` (sent as a Bearer token).
+
+## API
+
+- `GET /api/leaving-soon/status` - plugin status and configuration summary (admin auth)
+- `POST /api/leaving-soon/sync` - trigger an immediate sync (admin auth)
+
+## Building
+
+```bash
+./build.sh 1.0.0
+```
+
+The plugin DLL is produced under `build/`; a release zip and md5 are generated at
+the repo root.
+
+## Repository
+
+https://github.com/ramonskie/jellyfin-plugin-leaving-soon
