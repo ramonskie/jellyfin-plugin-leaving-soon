@@ -59,13 +59,13 @@ jobs:
           {
             echo "## What's Changed"
             if [ -n "$PREV_TAG" ]; then
-              git log --pretty=format:"- %s" "$PREV_TAG"..HEAD | grep -v -E '^(chore|ci|docs|Merge)' || true
+              git log --pretty=format:"- %s" "$PREV_TAG"..HEAD | grep -v -E '^- (chore|ci|docs|Merge)' || true
             else
-              git log --pretty=format:"- %s" | grep -v -E '^(chore|ci|docs|Merge)' || true
+              git log --pretty=format:"- %s" | grep -v -E '^- (chore|ci|docs|Merge)' || true
             fi
           } > /tmp/release-notes.md
           echo "" >> /tmp/release-notes.md
-          echo "**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/${{ github.ref_name }}...$PREV_TAG" >> /tmp/release-notes.md
+          echo "**Full Changelog:** https://github.com/ramonskie/jellyfin-plugin-leaving-soon/compare/$PREV_TAG...${{ github.ref_name }}" >> /tmp/release-notes.md
           cat /tmp/release-notes.md
 
       - name: Update plugin manifest
