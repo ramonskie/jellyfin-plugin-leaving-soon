@@ -32,4 +32,8 @@
     <EmbeddedResource Include="Configuration\configPage.html" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.LeavingSoon.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -35,6 +35,9 @@ jobs:
       - name: Run code analysis
         run: dotnet build --configuration Release --no-restore /warnaserror
 
+      - name: Run unit tests
+        run: dotnet test --configuration Release --no-restore
+
       - name: Check formatting
         run: dotnet format --verify-no-changes --no-restore
 

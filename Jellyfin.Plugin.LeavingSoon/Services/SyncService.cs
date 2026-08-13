@@ -65,12 +65,13 @@ public class SyncService : IScheduledTask
     /// <inheritdoc />
     public IEnumerable<TaskTriggerInfo> GetDefaultTriggers()
     {
+        var intervalMinutes = Plugin.Instance?.Configuration.SyncIntervalMinutes ?? 15;
         return
         [
             new TaskTriggerInfo
             {
                 Type = TaskTriggerInfoType.IntervalTrigger,
-                IntervalTicks = TimeSpan.FromMinutes(15).Ticks,
+                IntervalTicks = TimeSpan.FromMinutes(intervalMinutes).Ticks,
             }
         ];
     }
@@ -152,6 +153,30 @@ public class SyncService : IScheduledTask
         progress.Report(100);
     }
 
+    /// <summary>
+    /// Resolves the path to symlink for an item. Movies resolve to the media file;
+    /// the containing folder is used instead so the leaving-soon library shows the
+    /// whole movie folder, consistent with shows (which resolve to their series
+    /// folder and contain Season subdirectories). Only the folder is used when it is
+    /// a dedicated movie folder (no subdirectories) — a flat movie in a library root
+    /// falls back to a file symlink to avoid symlinking the entire library.
+    /// </summary>
+    /// <param name="sourcePath">The Jellyfin-resolved item path.</param>
+    /// <returns>The path to symlink (a folder for movies in their own folder, otherwise unchanged).</returns>
+    internal static string ResolveLinkSource(string sourcePath)
+    {
+        if (File.Exists(sourcePath))
+        {
+            var movieDir = Path.GetDirectoryName(sourcePath);
+            if (!string.IsNullOrEmpty(movieDir) && Directory.GetDirectories(movieDir).Length == 0)
+            {
+                return movieDir;
+            }
+        }
+
+        return sourcePath;
+    }
+
     private async Task SyncLibraryAsync(
         PluginConfiguration config,
         string libraryName,
@@ -200,19 +225,21 @@ public class SyncService : IScheduledTask
                 continue;
             }
 
-            var fileName = Path.GetFileName(item.SourcePath);
+            var sourcePath = ResolveLinkSource(item.SourcePath);
+
+            var fileName = Path.GetFileName(sourcePath);
             desired[fileName] = Path.Combine(symlinkDir, fileName);
             if (!File.Exists(desired[fileName]) && !Directory.Exists(desired[fileName]))
             {
                 try
                 {
                     await _symlinkManager
-                        .CreateSymlinkAsync(item.SourcePath, symlinkDir, cancellationToken)
+                        .CreateSymlinkAsync(sourcePath, symlinkDir, cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to create symlink for {Source}", item.SourcePath);
+                    _logger.LogWarning(ex, "Failed to create symlink for {Source}", sourcePath);
                 }
             }
         }

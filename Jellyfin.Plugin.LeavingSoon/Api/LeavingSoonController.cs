@@ -62,7 +62,7 @@ public class LeavingSoonController : ControllerBase
     /// <returns>Accepted response.</returns>
     [HttpPost("sync")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
-    public async Task<ActionResult> TriggerSync()
+    public ActionResult TriggerSync()
     {
         _logger.LogInformation("Manual sync triggered via API");
 

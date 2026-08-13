@@ -14,8 +14,9 @@ namespace Jellyfin.Plugin.LeavingSoon.Providers;
 
 /// <summary>
 /// Pulls leaving-soon media from OxiCleanarr's GET /api/media/leaving-soon endpoint.
-/// OxiCleanarr typically runs with admin.disable_auth=true for machine clients; the
-/// plugin also supports an API key sent as a Bearer token.
+/// OxiCleanarr accepts the static admin.api_key as a Bearer token on every protected
+/// endpoint (or can run with admin.disable_auth=true); set ApiKey to that key when
+/// auth is enabled.
 /// </summary>
 public sealed class OxiCleanarrProvider : ILeavingSoonProvider, IDisposable
 {
@@ -68,13 +69,26 @@ public sealed class OxiCleanarrProvider : ILeavingSoonProvider, IDisposable
 
         var items = payload.Items
             .Where(i => !string.IsNullOrWhiteSpace(i.MediaServerId))
-            .Select(i => new LeavingSoonItem
+            .Select(i =>
             {
-                MediaServerId = i.MediaServerId,
-                Type = i.Type == "show" ? "show" : "movie",
-                Title = i.Title,
-                DeletionDate = i.DeletionDate,
-                SourcePath = i.SourcePath,
+                if (!i.Type.Equals("movie", StringComparison.OrdinalIgnoreCase) &&
+                    !i.Type.Equals("show", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug(
+                        "Provider '{Provider}' returned unknown media type '{Type}' for '{Title}'; treating as movie",
+                        Name,
+                        i.Type,
+                        i.Title);
+                }
+
+                return new LeavingSoonItem
+                {
+                    MediaServerId = i.MediaServerId,
+                    Type = NormalizeType(i.Type),
+                    Title = i.Title,
+                    DeletionDate = i.DeletionDate,
+                    SourcePath = i.SourcePath,
+                };
             })
             .ToList();
 
@@ -90,6 +104,21 @@ public sealed class OxiCleanarrProvider : ILeavingSoonProvider, IDisposable
     {
         _httpClient.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Normalizes a provider media type to the plugin's "movie"/"show" values.
+    /// Anything outside the contract is treated as a movie so an unknown type
+    /// never leaks into the library partitioning.
+    /// </summary>
+    private static string NormalizeType(string? type)
+    {
+        if (string.Equals(type, "show", StringComparison.OrdinalIgnoreCase))
+        {
+            return "show";
+        }
+
+        return "movie";
     }
 }
 

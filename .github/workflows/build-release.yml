@@ -6,6 +6,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build plugin
@@ -14,17 +17,30 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '9.0.x'
 
+      - name: Set release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION="0.0.0"
+          fi
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Restore dependencies
         run: dotnet restore
 
       - name: Build plugin
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build --configuration Release --no-restore -p:Version="$RELEASE_VERSION.0"
+
+      - name: Run unit tests
+        run: dotnet test --configuration Release --no-restore
 
       - name: Publish plugin
         run: dotnet publish --configuration Release --no-restore --output=artifacts Jellyfin.Plugin.LeavingSoon/Jellyfin.Plugin.LeavingSoon.csproj
@@ -32,9 +48,48 @@ jobs:
       - name: Package release
         run: |
           cd artifacts
-          zip -r ../Jellyfin.Plugin.LeavingSoon-${{ github.ref_name }}.zip Jellyfin.Plugin.LeavingSoon.dll
+          zip -r "../Jellyfin.Plugin.LeavingSoon-${{ env.RELEASE_VERSION }}.zip" Jellyfin.Plugin.LeavingSoon.dll
           cd ..
-          md5sum "Jellyfin.Plugin.LeavingSoon-${{ github.ref_name }}.zip" > "Jellyfin.Plugin.LeavingSoon-${{ github.ref_name }}.zip.md5"
+          md5sum "Jellyfin.Plugin.LeavingSoon-${{ env.RELEASE_VERSION }}.zip" > "Jellyfin.Plugin.LeavingSoon-${{ env.RELEASE_VERSION }}.zip.md5"
+
+      - name: Update plugin manifest
+        env:
+          RELEASE_TAG: "${{ github.ref_name }}"
+        run: |
+          CHECKSUM=$(cut -d' ' -f1 "Jellyfin.Plugin.LeavingSoon-${{ env.RELEASE_VERSION }}.zip.md5")
+          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          python3 - "$RELEASE_VERSION" "$CHECKSUM" "$TS" "$RELEASE_TAG" <<'EOF'
+          import json, sys
+          version, checksum, ts, tag = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+          manifest_version = version + ".0"
+          with open('manifest.json') as f:
+              manifest = json.load(f)
+          entry = manifest[0]
+          source_url = f"https://github.com/ramonskie/jellyfin-plugin-leaving-soon/releases/download/{tag}/Jellyfin.Plugin.LeavingSoon-{version}.zip"
+          changelog = f"Version {version}\n- See the GitHub release notes for details."
+          entry["versions"] = [v for v in entry["versions"] if v["version"] != manifest_version]
+          entry["versions"].append({
+              "version": manifest_version,
+              "changelog": changelog,
+              "targetAbi": "10.11.0.0",
+              "sourceUrl": source_url,
+              "checksum": checksum,
+              "timestamp": ts,
+          })
+          entry["versions"].sort(key=lambda v: v["version"])
+          with open('manifest.json', 'w') as f:
+              json.dump(manifest, f, indent=4)
+              f.write("\n")
+          EOF
+          echo "manifest updated for $RELEASE_VERSION"
+
+      - name: Commit manifest update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "chore: add plugin manifest entry for v$RELEASE_VERSION"
+          git push
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

@@ -182,10 +182,13 @@ public class SymlinkManager
         }
 
         var symlinks = new List<SymlinkInfo>();
-        foreach (var file in Directory.GetFiles(directory))
+        foreach (var entry in Directory.GetFileSystemEntries(directory))
         {
-            var fileInfo = new FileInfo(file);
-            if (!fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            var fileInfo = new FileInfo(entry);
+            var dirInfo = new DirectoryInfo(entry);
+            var isReparsePoint = fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                || dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+            if (!isReparsePoint)
             {
                 continue;
             }
@@ -194,14 +197,14 @@ public class SymlinkManager
             {
                 symlinks.Add(new SymlinkInfo
                 {
-                    Path = file,
-                    Target = fileInfo.LinkTarget ?? "unknown",
-                    Name = Path.GetFileName(file),
+                    Path = entry,
+                    Target = fileInfo.LinkTarget ?? dirInfo.LinkTarget ?? "unknown",
+                    Name = Path.GetFileName(entry),
                 });
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to read symlink target for: {File}", file);
+                _logger.LogWarning(ex, "Failed to read symlink target for: {File}", entry);
             }
         }
 
