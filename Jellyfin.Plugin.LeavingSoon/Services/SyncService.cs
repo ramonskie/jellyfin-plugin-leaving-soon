@@ -260,8 +260,10 @@ public class SyncService : IScheduledTask
         var symlinkDir = Path.Combine(config.BasePath, subDir);
         var collectionType = subDir == TvSubDir ? "tvshows" : "movies";
 
-        // Hide-when-empty: clean symlinks and delete the virtual folder. DeleteVirtualFolderAsync
-        // rebuilds the top-level library folders so the library disappears from user views.
+        // Hide-when-empty: disable the library instead of deleting it. LibraryOptions.Enabled
+        // (CollectionFolder.IsVisible) is the server-native "enable this library" toggle; disabling
+        // hides the library from all user views while keeping its metadata rows and symlinks
+        // intact, so re-enabling on the next sync with items is instant with zero rescan.
         if (items.Count == 0)
         {
             if (!config.HideWhenEmpty)
@@ -270,16 +272,14 @@ public class SyncService : IScheduledTask
                 return;
             }
 
-            var existing = _virtualFolderManager.GetVirtualFolder(libraryName);
-            if (existing == null)
+            if (_virtualFolderManager.GetVirtualFolder(libraryName) == null)
             {
-                _logger.LogDebug("Library {Name} already absent, nothing to do", libraryName);
+                _logger.LogDebug("Library {Name} does not exist yet, nothing to disable", libraryName);
                 return;
             }
 
-            _logger.LogInformation("Library {Name} is empty - cleaning up (hide_when_empty)", libraryName);
-            CleanupAllSymlinks(symlinkDir);
-            await _virtualFolderManager.DeleteVirtualFolderAsync(libraryName).ConfigureAwait(false);
+            _logger.LogInformation("Library {Name} is empty - disabling (hide_when_empty)", libraryName);
+            await _virtualFolderManager.SetLibraryEnabledAsync(libraryName, false).ConfigureAwait(false);
             return;
         }
 
@@ -290,6 +290,10 @@ public class SyncService : IScheduledTask
         var (_, needsInitialScan) = await _virtualFolderManager
             .EnsureVirtualFolderAsync(libraryName, collectionType, symlinkDir)
             .ConfigureAwait(false);
+
+        // A library disabled while empty must be brought back before the content refresh,
+        // or it stays hidden even after the scan.
+        await _virtualFolderManager.SetLibraryEnabledAsync(libraryName, true).ConfigureAwait(false);
 
         // Create symlinks for items that are not yet linked.
         var desired = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -348,26 +352,6 @@ public class SyncService : IScheduledTask
         else
         {
             _virtualFolderManager.QuickRefreshPath(symlinkDir);
-        }
-    }
-
-    private void CleanupAllSymlinks(string symlinkDir)
-    {
-        if (!Directory.Exists(symlinkDir))
-        {
-            return;
-        }
-
-        foreach (var link in _symlinkManager.ListSymlinks(symlinkDir))
-        {
-            try
-            {
-                _symlinkManager.RemoveSymlink(link.Path);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to remove symlink {Path}", link.Path);
-            }
         }
     }
 
