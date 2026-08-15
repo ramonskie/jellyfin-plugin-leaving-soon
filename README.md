@@ -44,10 +44,26 @@ The plugin resolves each item's on-disk path from Jellyfin's own metadata
    - ensure the Jellyfin virtual folder exists (create or add path),
    - create symlinks for newly-scheduled items,
    - remove stale symlinks no longer scheduled,
-   - trigger a library refresh.
-4. `HideWhenEmpty`: when a library has zero items it is cleaned, the virtual folder
-   is deleted, and a **double refresh ~5s apart** runs so Jellyfin updates its user
-   views (the empirically-confirmed behavior from OxiCleanarr).
+   - trigger a library refresh,
+   - regenerate the library cover so it reflects the current leaving-soon set.
+4. `HideWhenEmpty`: when a library has zero items it is **disabled** (hidden from all
+   user views) instead of deleted — its metadata rows and symlinks are kept intact, so
+   re-enabling on the next sync with items is instant with zero rescan. When the library
+   comes back from the empty period its cover is force-regenerated so the previous leaving
+   set's collage does not linger.
+
+## Uninstall
+
+Uninstalling the plugin cleans up after itself:
+
+- removes every symlink it created under `<BasePath>/movies` and `<BasePath>/tv`,
+  and deletes those subdirectories once empty (never recursive — real content or a real
+  library at the base path always survives),
+- disables and removes the leaving-soon libraries, purging their orphaned metadata rows.
+
+Cleanup is guarded: a library is only removed when every one of its locations points
+under the plugin's own base path, so a real (admin-created) library that happens to share
+a configured name is never touched.
 
 ## Configuration
 
@@ -58,7 +74,7 @@ Edit `config.xml` in the plugin's config directory and restart Jellyfin.
 | `BasePath` | `/config/leaving-soon` | Host directory for symlinks; `movies/` and `tv/` subdirectories. Defaults to the Jellyfin config volume so the container user can always write it (no chown needed) |
 | `MoviesLibraryName` | `Movies - Leaving Soon` | Jellyfin library name for movies |
 | `TvLibraryName` | `Shows - Leaving Soon` | Jellyfin library name for TV |
-| `HideWhenEmpty` | `true` | Delete empty libraries instead of showing them |
+| `HideWhenEmpty` | `true` | Hide empty leaving-soon libraries from the sidebar instead of showing them empty |
 | `SyncIntervalMinutes` | `15` | Poll interval |
 | `ForceEmptyAfterFailureCount` | `3` | Consecutive provider failures tolerated before an empty result is trusted |
 | `Providers` | `[]` | List of provider configs (`Type`, `Name`, `Enabled`, `Url`, `ApiKey`, `IncludeCollections`) |
@@ -95,6 +111,9 @@ Note on auth:
 ## API
 
 - `GET /api/leaving-soon/status` - plugin status and configuration summary (admin auth)
+- `GET /api/leaving-soon/debug` - diagnostic snapshot of the current sync inputs: configured
+  providers and per-item path resolution (admin auth). Helps trace why a sync reconciled to
+  an empty library.
 - `POST /api/leaving-soon/sync` - trigger an immediate sync (admin auth)
 - `POST /api/leaving-soon/test-connection` - test a provider's URL/auth against its
   leaving-soon endpoint (admin auth). Accepts unsaved provider settings
