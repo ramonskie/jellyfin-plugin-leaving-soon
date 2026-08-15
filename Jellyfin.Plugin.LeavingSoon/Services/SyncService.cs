@@ -208,7 +208,8 @@ public class SyncService : IScheduledTask
         var symlinkDir = Path.Combine(config.BasePath, subDir);
         var collectionType = subDir == TvSubDir ? "tvshows" : "movies";
 
-        // Hide-when-empty: clean symlinks, delete the virtual folder, double-refresh.
+        // Hide-when-empty: clean symlinks and delete the virtual folder. DeleteVirtualFolderAsync
+        // rebuilds the top-level library folders so the library disappears from user views.
         if (items.Count == 0)
         {
             if (!config.HideWhenEmpty)
@@ -227,13 +228,14 @@ public class SyncService : IScheduledTask
             _logger.LogInformation("Library {Name} is empty - cleaning up (hide_when_empty)", libraryName);
             CleanupAllSymlinks(symlinkDir);
             await _virtualFolderManager.DeleteVirtualFolderAsync(libraryName).ConfigureAwait(false);
-            await _virtualFolderManager.DoubleRefreshAsync().ConfigureAwait(false);
             return;
         }
 
-        // Ensure the host directory and virtual folder exist.
+        // Ensure the host directory and virtual folder exist. AddVirtualFolder already
+        // makes the new library show up in user views, so no separate view refresh is
+        // needed here.
         _symlinkManager.EnsureDirectoryExists(symlinkDir);
-        var libraryItemId = await _virtualFolderManager
+        var (_, needsInitialScan) = await _virtualFolderManager
             .EnsureVirtualFolderAsync(libraryName, collectionType, symlinkDir)
             .ConfigureAwait(false);
 
@@ -282,10 +284,19 @@ public class SyncService : IScheduledTask
             }
         }
 
-        // Refresh so newly-created symlinks show up. libraryItemId is captured for
-        // future scoped-refresh use; global refresh is reliable for both cases today.
-        _ = libraryItemId;
-        _virtualFolderManager.RefreshLibrary();
+        // Refresh so newly-created symlinks show up. A brand-new library (or a freshly
+        // added path) needs a global scan: the physical folder at the symlink path only
+        // gets materialized by a scan, and a scoped path refresh has nothing to resolve
+        // to before that. Once the library exists, a scoped refresh of the symlink
+        // directory is enough to pick up added/removed symlinks.
+        if (needsInitialScan)
+        {
+            _virtualFolderManager.RefreshLibrary();
+        }
+        else
+        {
+            _virtualFolderManager.QuickRefreshPath(symlinkDir);
+        }
     }
 
     private void CleanupAllSymlinks(string symlinkDir)
