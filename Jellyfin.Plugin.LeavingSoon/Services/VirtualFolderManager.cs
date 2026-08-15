@@ -89,75 +89,49 @@ public class VirtualFolderManager
     }
 
     /// <summary>
-    /// Deletes a virtual folder by name and rebuilds the top-level library folders so
-    /// the removed library disappears from user views. <see cref="ILibraryManager.RemoveVirtualFolder"/>
-    /// alone (with refreshLibrary=false) leaves the cached root children stale; calling
-    /// <see cref="ILibraryManager.ValidateTopLibraryFolders"/> with removeRoot=true purges the
-    /// orphaned collection folder without a full library scan.
+    /// Enables or disables a virtual folder. Disabling hides the library from all user
+    /// views while keeping it, its metadata rows and its symlinks intact — CollectionFolder
+    /// <c>IsVisible</c> returns false whenever <c>LibraryOptions.Enabled</c> is false, and
+    /// reads the options live, so the toggle takes effect immediately and re-enabling is
+    /// instant with no rescan. This is the same toggle the dashboard Library Settings
+    /// exposes via its "Enable the library" option.
     /// </summary>
     /// <param name="name">The library name.</param>
-    /// <returns>A task representing the operation.</returns>
-    public async Task DeleteVirtualFolderAsync(string name)
+    /// <param name="enabled">Whether the library should be visible in user views.</param>
+    /// <returns>A completed task.</returns>
+    public Task SetLibraryEnabledAsync(string name, bool enabled)
     {
         var virtualFolder = GetVirtualFolder(name);
         if (virtualFolder == null)
         {
-            _logger.LogDebug("Virtual folder {Name} does not exist, nothing to delete", name);
-            return;
+            _logger.LogDebug("Virtual folder {Name} does not exist, nothing to toggle", name);
+            return Task.CompletedTask;
         }
 
-        Guid? itemId = Guid.TryParse(virtualFolder.ItemId, out var parsed) ? parsed : null;
-
-        _logger.LogInformation("Deleting virtual folder {Name}", name);
-        await _libraryManager.RemoveVirtualFolder(name, false).ConfigureAwait(false);
-
-        // RemoveVirtualFolder only drops the config entry and the collection folder
-        // directory. The orphaned CollectionFolder item can survive revalidation and
-        // keep materializing in user views, so purge the database item explicitly —
-        // the same path the dashboard's DELETE /Items/{id} takes. This must happen
-        // before ValidateTopLibraryFolders rebuilds the root folder children, or the
-        // ghost library stays visible in user views.
-        //
-        // DeleteItem cascade-removes the folder's child baseitem rows too, wiping the
-        // leaving-soon library's metadata index and its (duplicate-of-the-real-library)
-        // playstate. That is intentional: the rows only exist because Jellyfin scanned
-        // the symlinked media, no files are touched (DeleteFileLocation=false), and it
-        // is the same operation the dashboard performs. The guard is the name contract:
-        // DeleteVirtualFolderAsync is only ever called with MoviesLibraryName or
-        // TvLibraryName, which the plugin owns.
-        if (itemId.HasValue)
+        if (!Guid.TryParse(virtualFolder.ItemId, out var itemId))
         {
-            try
-            {
-                var item = _libraryManager.GetItemById(itemId.Value);
-                if (item is CollectionFolder)
-                {
-                    _logger.LogInformation("Purging orphaned collection folder item {ItemId} for {Name}", itemId.Value, name);
-                    _libraryManager.DeleteItem(item, new DeleteOptions(), true);
-                }
-                else
-                {
-                    _logger.LogDebug("No orphaned collection folder item to purge for {Name}", name);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to purge collection folder item for {Name}", name);
-            }
+            _logger.LogWarning("Virtual folder {Name} has an invalid item id, cannot toggle enabled state", name);
+            return Task.CompletedTask;
         }
 
-        // The delete has already committed, so don't let sync cancellation strand a
-        // stale view here — revalidate with CancellationToken.None. If revalidation
-        // fails, log and move on: the orphaned collection folder is harmless and a
-        // future sync will rebuild the library from scratch anyway.
-        try
+        var folder = _libraryManager.GetItemById<CollectionFolder>(itemId);
+        if (folder == null)
         {
-            await _libraryManager.ValidateTopLibraryFolders(CancellationToken.None, true).ConfigureAwait(false);
+            _logger.LogWarning("Collection folder item {ItemId} for {Name} was not found", itemId, name);
+            return Task.CompletedTask;
         }
-        catch (Exception ex)
+
+        var options = folder.GetLibraryOptions();
+        if (options.Enabled == enabled)
         {
-            _logger.LogWarning(ex, "Failed to revalidate top-level library folders after deleting {Name}", name);
+            _logger.LogDebug("Virtual folder {Name} is already {State}", name, enabled ? "enabled" : "disabled");
+            return Task.CompletedTask;
         }
+
+        options.Enabled = enabled;
+        folder.UpdateLibraryOptions(options);
+        _logger.LogInformation("Virtual folder {Name} {State}", name, enabled ? "enabled" : "disabled");
+        return Task.CompletedTask;
     }
 
     /// <summary>
