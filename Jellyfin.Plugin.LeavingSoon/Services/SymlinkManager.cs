@@ -107,18 +107,22 @@ public class SymlinkManager
     {
         ValidatePath(symlinkPath, nameof(symlinkPath));
 
-        if (!File.Exists(symlinkPath) && !Directory.Exists(symlinkPath))
-        {
-            _logger.LogWarning("Symlink does not exist: {Path}", symlinkPath);
-            return;
-        }
-
         var fileInfo = new FileInfo(symlinkPath);
         var dirInfo = new DirectoryInfo(symlinkPath);
-        var isReparsePoint = fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)
-            || dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+
+        // File.Exists / Directory.Exists follow the link target, so a dangling symlink
+        // (target already removed) may report as non-existent on some platforms. Detect
+        // it by its reparse-point attribute instead and remove the link itself.
+        var isPresent = File.Exists(symlinkPath) || Directory.Exists(symlinkPath);
+        var isReparsePoint = TryGetReparsePoint(fileInfo, dirInfo);
         if (!isReparsePoint)
         {
+            if (!isPresent)
+            {
+                _logger.LogWarning("Path does not exist: {Path}", symlinkPath);
+                return;
+            }
+
             _logger.LogError("Refusing to delete {Path}: not a symlink", symlinkPath);
             throw new InvalidOperationException($"Path is not a symlink: {symlinkPath}");
         }
@@ -130,6 +134,7 @@ public class SymlinkManager
         }
         else
         {
+            // Works for file symlinks, directory symlinks, and dangling links alike.
             File.Delete(symlinkPath);
         }
     }
@@ -167,6 +172,26 @@ public class SymlinkManager
     }
 
     /// <summary>
+    /// Removes every symlink inside a directory. Used by uninstall cleanup to drop all
+    /// links the plugin created. Unrelated entries (real files/folders) are left alone.
+    /// </summary>
+    /// <param name="directory">The directory whose symlinks should be removed.</param>
+    public void RemoveAllSymlinks(string directory)
+    {
+        foreach (var link in ListSymlinks(directory))
+        {
+            try
+            {
+                RemoveSymlink(link.Path);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to remove symlink {Path}", link.Path);
+            }
+        }
+    }
+
+    /// <summary>
     /// Lists all symlinks in a directory.
     /// </summary>
     /// <param name="directory">The directory to list symlinks from.</param>
@@ -186,9 +211,7 @@ public class SymlinkManager
         {
             var fileInfo = new FileInfo(entry);
             var dirInfo = new DirectoryInfo(entry);
-            var isReparsePoint = fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)
-                || dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
-            if (!isReparsePoint)
+            if (!TryGetReparsePoint(fileInfo, dirInfo))
             {
                 continue;
             }
@@ -226,6 +249,21 @@ public class SymlinkManager
         if (path.Contains("..", StringComparison.Ordinal))
         {
             throw new UnauthorizedAccessException($"Path traversal detected in {paramName}: {path}");
+        }
+    }
+
+    private static bool TryGetReparsePoint(FileInfo fileInfo, DirectoryInfo dirInfo)
+    {
+        try
+        {
+            return fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                || dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint);
+        }
+        catch (IOException)
+        {
+            // Some platforms throw when stat'ing a broken link or a path that vanished
+            // mid-check; treat that as "not a symlink we can reason about".
+            return false;
         }
     }
 }

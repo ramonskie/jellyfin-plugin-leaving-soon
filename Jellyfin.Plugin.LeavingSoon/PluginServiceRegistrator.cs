@@ -14,6 +14,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
+        // Hand the running app host to the plugin so OnUninstalling can resolve the
+        // cleanup services after the DI container is built.
+        Plugin.ApplicationHost = applicationHost;
+
         serviceCollection.AddSingleton<SymlinkManager>();
         serviceCollection.AddSingleton<VirtualFolderManager>();
         serviceCollection.AddSingleton<ProviderRegistry>();

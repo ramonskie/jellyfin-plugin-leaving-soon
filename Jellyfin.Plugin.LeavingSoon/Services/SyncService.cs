@@ -21,8 +21,15 @@ namespace Jellyfin.Plugin.LeavingSoon.Services;
     Justification = "Singleton registered in the DI container; the sync semaphore lives for the process lifetime.")]
 public class SyncService : IScheduledTask
 {
-    private const string MoviesSubDir = "movies";
-    private const string TvSubDir = "tv";
+    /// <summary>
+    /// Subdirectory under <see cref="Configuration.PluginConfiguration.BasePath"/> that holds movie symlinks.
+    /// </summary>
+    public const string MoviesSubDir = "movies";
+
+    /// <summary>
+    /// Subdirectory under <see cref="Configuration.PluginConfiguration.BasePath"/> that holds tv symlinks.
+    /// </summary>
+    public const string TvSubDir = "tv";
 
     private readonly ProviderRegistry _providerRegistry;
     private readonly SymlinkManager _symlinkManager;

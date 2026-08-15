@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -147,6 +148,111 @@ public class VirtualFolderManager
     }
 
     /// <summary>
+    /// Deletes a virtual folder by name and rebuilds the top-level library folders so
+    /// the removed library disappears from user views. <see cref="ILibraryManager.RemoveVirtualFolder"/>
+    /// alone (with refreshLibrary=false) leaves the cached root children stale; calling
+    /// <see cref="ILibraryManager.ValidateTopLibraryFolders"/> with removeRoot=true purges the
+    /// orphaned collection folder without a full library scan.
+    /// </summary>
+    /// <param name="name">The library name.</param>
+    /// <param name="ownedPath">The directory a plugin-created library exclusively points at.
+    /// Deletion only proceeds when every location resolves under this path. Removing a real
+    /// (admin-created) library is avoided even when the plugin merged its symlink path into
+    /// it (see <see cref="EnsureVirtualFolderAsync"/>): such a library also holds locations
+    /// outside this path, and the whole virtual folder (all locations) would be deleted and
+    /// its metadata rows cascade-purged, so any unowned location aborts the delete.</param>
+    /// <returns>A task representing the operation.</returns>
+    public async Task DeleteVirtualFolderAsync(string name, string ownedPath)
+    {
+        var virtualFolder = GetVirtualFolder(name);
+        if (virtualFolder == null)
+        {
+            _logger.LogDebug("Virtual folder {Name} does not exist, nothing to delete", name);
+            return;
+        }
+
+        if (!virtualFolder.Locations.All(location => IsOwnedLocation(location, ownedPath)))
+        {
+            _logger.LogWarning(
+                "Skipping deletion of virtual folder {Name}: not every location points under {OwnedPath} " +
+                "(name collision with, or path merged into, a library this plugin does not own)",
+                name,
+                ownedPath);
+            return;
+        }
+
+        // Disable the library before removing it so it drops out of user views instantly
+        // (CollectionFolder IsVisible reads LibraryOptions.Enabled live) and stays hidden
+        // even if a later removal step fails. Cosmetic only — the purge below is what
+        // actually removes the library. Never makes real progress on failure, and the
+        // library is already confirmed owned, so this is safe.
+        await SetLibraryEnabledAsync(name, false).ConfigureAwait(false);
+
+        Guid? itemId = Guid.TryParse(virtualFolder.ItemId, out var parsed) ? parsed : null;
+
+        _logger.LogInformation("Deleting virtual folder {Name}", name);
+
+        // RemoveVirtualFolder throws a FileNotFoundException when the collection-folder
+        // directory at <data>/root/default/<name> is already gone. That must not abort the
+        // cleanup of the other (Tv) library, so isolate it: the config entry is still
+        // dropped and the orphaned item purge below still runs from the item id.
+        try
+        {
+            await _libraryManager.RemoveVirtualFolder(name, false).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RemoveVirtualFolder reported an error for {Name}, continuing with item purge", name);
+        }
+
+        // RemoveVirtualFolder only drops the config entry and the collection folder
+        // directory. The orphaned CollectionFolder item can survive revalidation and
+        // keep materializing in user views, so purge the database item explicitly —
+        // the same path the dashboard's DELETE /Items/{id} takes. This must happen
+        // before ValidateTopLibraryFolders rebuilds the root folder children, or the
+        // ghost library stays visible in user views.
+        //
+        // DeleteItem cascade-removes the folder's child baseitem rows too, wiping the
+        // leaving-soon library's metadata index and its (duplicate-of-the-real-library)
+        // playstate. That is intentional: the rows only exist because Jellyfin scanned
+        // the symlinked media, no files are touched (DeleteFileLocation=false), and it
+        // is the same operation the dashboard performs. The guard is the name contract:
+        // DeleteVirtualFolderAsync is only ever called with MoviesLibraryName or
+        // TvLibraryName, which the plugin owns.
+        if (itemId.HasValue)
+        {
+            try
+            {
+                var item = _libraryManager.GetItemById(itemId.Value);
+                if (item is CollectionFolder)
+                {
+                    _logger.LogInformation("Purging orphaned collection folder item {ItemId} for {Name}", itemId.Value, name);
+                    _libraryManager.DeleteItem(item, new DeleteOptions(), true);
+                }
+                else
+                {
+                    _logger.LogDebug("No orphaned collection folder item to purge for {Name}", name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to purge collection folder item for {Name}", name);
+            }
+        }
+
+        // The delete has already committed, so don't let sync cancellation strand a
+        // stale view here — revalidate with CancellationToken.None.
+        try
+        {
+            await _libraryManager.ValidateTopLibraryFolders(CancellationToken.None, true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to revalidate top-level library folders after deleting {Name}", name);
+        }
+    }
+
+    /// <summary>
     /// Triggers a global library scan. Needed when a brand-new leaving-soon library is
     /// created: the physical folder at the symlink path is only materialized by a scan,
     /// and until then a scoped path refresh has nothing to resolve to. Once that physical
@@ -171,5 +277,39 @@ public class VirtualFolderManager
     {
         _logger.LogInformation("Triggering scoped library refresh for {Path}", path);
         _libraryMonitor.ReportFileSystemChanged(path);
+    }
+
+    /// <summary>
+    /// Determines whether a virtual-folder location points under the directory this plugin
+    /// manages (the base path by sub-directory). Used as the ownership guard before any
+    /// destructive removal: a plugin-created library always holds a location under this
+    /// path, while an admin library colliding with a configured library name never does.
+    /// </summary>
+    /// <param name="location">A single location of the virtual folder.</param>
+    /// <param name="ownedPath">The fully-prefixed directory the location must resolve under.</param>
+    /// <returns>True when the location is at or under <paramref name="ownedPath"/>. An empty
+    /// <paramref name="ownedPath"/> (misconfigured base path) is never owned.</returns>
+    internal static bool IsOwnedLocation(string location, string ownedPath)
+    {
+        if (string.IsNullOrWhiteSpace(ownedPath))
+        {
+            // A blank owned path means every path would match; that is a misconfiguration
+            // (empty BasePath), not ownership. Fail closed so uninstall deletes nothing.
+            return false;
+        }
+
+        // Linux/macOS filesystems are case-sensitive, Windows is not. Match the semantics
+        // of the underlying filesystem so a case-variant real library is not treated as owned.
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (!location.StartsWith(ownedPath, comparison))
+        {
+            return false;
+        }
+
+        // Ensure a real path-boundary match: <owned>/x belongs, <owned>-sibling does not.
+        return location.Length == ownedPath.Length || location[ownedPath.Length] == Path.DirectorySeparatorChar;
     }
 }
