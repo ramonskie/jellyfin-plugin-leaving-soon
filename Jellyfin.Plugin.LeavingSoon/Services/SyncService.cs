@@ -122,6 +122,58 @@ public class SyncService : IScheduledTask
         }
     }
 
+    /// <summary>
+    /// Builds a diagnostic snapshot of the current sync inputs: the configured
+    /// providers and whether each collected leaving-soon item resolves to a Jellyfin
+    /// path. Backs the debug endpoint so a "sync reconciled to nothing" situation can
+    /// be traced without server log access.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The diagnostic snapshot.</returns>
+    public async Task<SyncDiagnostics> DiagnoseAsync(CancellationToken cancellationToken)
+    {
+        // Take the sync lock so the snapshot is consistent and a debug hit can't
+        // double-poll the providers while a scheduled sync is mid-run. If a sync is
+        // running, the debug response simply waits for it to finish.
+        await _syncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var result = new SyncDiagnostics();
+            var config = Plugin.Instance?.Configuration;
+            if (config == null)
+            {
+                return result;
+            }
+
+            result.ConfiguredProviders = config.Providers
+                .Select(p => new ProviderRecord(p.Name, p.Type, p.Enabled, p.Url))
+                .ToList();
+
+            var (items, failureCount) = await _providerRegistry
+                .CollectItemsAsync(config, cancellationToken)
+                .ConfigureAwait(false);
+
+            result.ProviderFailures = failureCount;
+            result.ConsecutiveProviderFailures = _consecutiveProviderFailures;
+
+            foreach (var item in items)
+            {
+                var path = ResolvePath(item);
+                result.Items.Add(new ItemRecord(item.MediaServerId, item.Title ?? string.Empty, item.Type, path));
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    result.ResolvedCount++;
+                }
+            }
+
+            return result;
+        }
+        finally
+        {
+            _syncLock.Release();
+        }
+    }
+
     private async Task ExecuteCoreAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var config = Plugin.Instance?.Configuration;
@@ -329,4 +381,130 @@ public class SyncService : IScheduledTask
         var baseItem = _libraryManager.GetItemById(guid);
         return string.IsNullOrWhiteSpace(baseItem?.Path) ? null : baseItem.Path;
     }
+}
+
+/// <summary>
+/// Diagnostic snapshot of a sync run, exposed by the debug endpoint.
+/// </summary>
+public class SyncDiagnostics
+{
+    /// <summary>
+    /// Gets or sets the configured providers (enabled or not).
+    /// </summary>
+    public List<ProviderRecord> ConfiguredProviders { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets the number of providers that failed during the diagnostic poll.
+    /// </summary>
+    public int ProviderFailures { get; set; }
+
+    /// <summary>
+    /// Gets or sets the running consecutive-failure counter used by the provider-outage guard.
+    /// </summary>
+    public int ConsecutiveProviderFailures { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of collected items that resolved to a Jellyfin path.
+    /// </summary>
+    public int ResolvedCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets the collected leaving-soon items with their resolution status.
+    /// </summary>
+    public List<ItemRecord> Items { get; set; } = [];
+}
+
+/// <summary>
+/// A configured provider and its enabled flag.
+/// </summary>
+public class ProviderRecord
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProviderRecord"/> class.
+    /// </summary>
+    /// <param name="name">The provider display name.</param>
+    /// <param name="type">The provider type.</param>
+    /// <param name="enabled">Whether the provider is enabled.</param>
+    /// <param name="url">The provider base url.</param>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1054:Uri parameters should not be strings",
+        Justification = "Mirrors ProviderConfig.Url; kept as a string so the debug endpoint can surface unresolved settings.")]
+    public ProviderRecord(string name, string type, bool enabled, string url)
+    {
+        Name = name;
+        Type = type;
+        Enabled = enabled;
+        Url = url;
+    }
+
+    /// <summary>
+    /// Gets the provider display name.
+    /// </summary>
+    public string Name { get; }
+
+    /// <summary>
+    /// Gets the provider type ("oxicleanarr" or "maintainerr").
+    /// </summary>
+    public string Type { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the provider is enabled.
+    /// </summary>
+    public bool Enabled { get; }
+
+    /// <summary>
+    /// Gets the provider base url.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Design",
+        "CA1056:Uri properties should not be strings",
+        Justification = "Mirrors ProviderConfig.Url; exposed so the debug endpoint can surface unresolved settings.")]
+    public string Url { get; }
+}
+
+/// <summary>
+/// A collected leaving-soon item and whether it resolved to a Jellyfin path.
+/// </summary>
+public class ItemRecord
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ItemRecord"/> class.
+    /// </summary>
+    /// <param name="mediaServerId">The Jellyfin item id reported by the provider.</param>
+    /// <param name="title">The item title.</param>
+    /// <param name="type">The media type ("movie" or "show").</param>
+    /// <param name="path">The resolved Jellyfin path, or null when unresolvable.</param>
+    public ItemRecord(string mediaServerId, string title, string type, string? path)
+    {
+        MediaServerId = mediaServerId;
+        Title = title;
+        Type = type;
+        Path = path;
+    }
+
+    /// <summary>
+    /// Gets the Jellyfin item id reported by the provider.
+    /// </summary>
+    public string MediaServerId { get; }
+
+    /// <summary>
+    /// Gets the item title.
+    /// </summary>
+    public string Title { get; }
+
+    /// <summary>
+    /// Gets the media type ("movie" or "show").
+    /// </summary>
+    public string Type { get; }
+
+    /// <summary>
+    /// Gets the resolved Jellyfin path, or null when unresolvable.
+    /// </summary>
+    public string? Path { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the item resolved to a Jellyfin path.
+    /// </summary>
+    public bool Resolved => !string.IsNullOrWhiteSpace(Path);
 }

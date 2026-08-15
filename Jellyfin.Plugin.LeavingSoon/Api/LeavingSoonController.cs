@@ -79,6 +79,20 @@ public class LeavingSoonController : ControllerBase
     }
 
     /// <summary>
+    /// Dumps the current sync inputs for debugging: configured providers and per-item
+    /// path resolution. Helps trace why a sync reconciled to an empty library.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The diagnostic snapshot.</returns>
+    [HttpGet("debug")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<SyncDiagnostics>> GetDebug(CancellationToken cancellationToken)
+    {
+        var diagnostics = await _syncService.DiagnoseAsync(cancellationToken).ConfigureAwait(false);
+        return Ok(diagnostics);
+    }
+
+    /// <summary>
     /// Tests connectivity to a provider using the supplied (possibly unsaved) settings.
     /// </summary>
     /// <param name="request">The provider settings to test.</param>
