@@ -3,6 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
@@ -98,14 +99,52 @@ public class VirtualFolderManager
     /// <returns>A task representing the operation.</returns>
     public async Task DeleteVirtualFolderAsync(string name)
     {
-        if (GetVirtualFolder(name) == null)
+        var virtualFolder = GetVirtualFolder(name);
+        if (virtualFolder == null)
         {
             _logger.LogDebug("Virtual folder {Name} does not exist, nothing to delete", name);
             return;
         }
 
+        Guid? itemId = Guid.TryParse(virtualFolder.ItemId, out var parsed) ? parsed : null;
+
         _logger.LogInformation("Deleting virtual folder {Name}", name);
         await _libraryManager.RemoveVirtualFolder(name, false).ConfigureAwait(false);
+
+        // RemoveVirtualFolder only drops the config entry and the collection folder
+        // directory. The orphaned CollectionFolder item can survive revalidation and
+        // keep materializing in user views, so purge the database item explicitly —
+        // the same path the dashboard's DELETE /Items/{id} takes. This must happen
+        // before ValidateTopLibraryFolders rebuilds the root folder children, or the
+        // ghost library stays visible in user views.
+        //
+        // DeleteItem cascade-removes the folder's child baseitem rows too, wiping the
+        // leaving-soon library's metadata index and its (duplicate-of-the-real-library)
+        // playstate. That is intentional: the rows only exist because Jellyfin scanned
+        // the symlinked media, no files are touched (DeleteFileLocation=false), and it
+        // is the same operation the dashboard performs. The guard is the name contract:
+        // DeleteVirtualFolderAsync is only ever called with MoviesLibraryName or
+        // TvLibraryName, which the plugin owns.
+        if (itemId.HasValue)
+        {
+            try
+            {
+                var item = _libraryManager.GetItemById(itemId.Value);
+                if (item is CollectionFolder)
+                {
+                    _logger.LogInformation("Purging orphaned collection folder item {ItemId} for {Name}", itemId.Value, name);
+                    _libraryManager.DeleteItem(item, new DeleteOptions(), true);
+                }
+                else
+                {
+                    _logger.LogDebug("No orphaned collection folder item to purge for {Name}", name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to purge collection folder item for {Name}", name);
+            }
+        }
 
         // The delete has already committed, so don't let sync cancellation strand a
         // stale view here — revalidate with CancellationToken.None. If revalidation
