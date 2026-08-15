@@ -4,10 +4,15 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.IO;
+using MediaBrowser.Model.Providers;
+using MediaBrowser.Model.Querying;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.LeavingSoon.Services;
@@ -20,6 +25,7 @@ public class VirtualFolderManager
 {
     private readonly ILibraryManager _libraryManager;
     private readonly ILibraryMonitor _libraryMonitor;
+    private readonly IFileSystem _fileSystem;
     private readonly ILogger<VirtualFolderManager> _logger;
 
     /// <summary>
@@ -27,14 +33,17 @@ public class VirtualFolderManager
     /// </summary>
     /// <param name="libraryManager">The library manager.</param>
     /// <param name="libraryMonitor">The library monitor, used for scoped (path-level) refreshes.</param>
+    /// <param name="fileSystem">The file system, used to build directory services for metadata refreshes.</param>
     /// <param name="logger">The logger.</param>
     public VirtualFolderManager(
         ILibraryManager libraryManager,
         ILibraryMonitor libraryMonitor,
+        IFileSystem fileSystem,
         ILogger<VirtualFolderManager> logger)
     {
         _libraryManager = libraryManager;
         _libraryMonitor = libraryMonitor;
+        _fileSystem = fileSystem;
         _logger = logger;
     }
 
@@ -47,6 +56,26 @@ public class VirtualFolderManager
     {
         return _libraryManager.GetVirtualFolders()
             .FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether a virtual folder is currently enabled (visible in
+    /// user views). Used to detect the empty→refill transition so the cover can be
+    /// force-regenerated on re-enable. Mirrors the enabled-state read in
+    /// <see cref="SetLibraryEnabledAsync"/>.
+    /// </summary>
+    /// <param name="name">The library name.</param>
+    /// <returns>True when the library exists and is enabled; false when it is missing or disabled.</returns>
+    public bool IsLibraryEnabled(string name)
+    {
+        var virtualFolder = GetVirtualFolder(name);
+        if (virtualFolder == null || !Guid.TryParse(virtualFolder.ItemId, out var itemId))
+        {
+            return false;
+        }
+
+        var folder = _libraryManager.GetItemById<CollectionFolder>(itemId);
+        return folder?.GetLibraryOptions().Enabled ?? false;
     }
 
     /// <summary>
@@ -280,6 +309,114 @@ public class VirtualFolderManager
     }
 
     /// <summary>
+    /// Regenerates a leaving-soon library's cover after its items change. Jellyfin derives
+    /// a library's primary image from a dynamic collage (<c>CollectionFolderImageProvider</c>):
+    /// up to 8 random items with primary images are composited into a thumbnail, and that
+    /// collage is only regenerated when the CollectionFolder's own metadata is refreshed —
+    /// and only when items with primary images exist at that moment. A scoped path refresh
+    /// (or even Jellyfin's own first-scan ordering) never re-refreshes the CollectionFolder
+    /// after items are indexed, so a fresh library shows no cover until a later full scan.
+    /// </summary>
+    /// <remarks>
+    /// This waits for the just-triggered scan to index at least one item with a primary image,
+    /// then regenerates the cover. When <paramref name="forceRefresh"/> is false the gate is a
+    /// null image: the collage only needs generating while no cover exists yet (once a cover
+    /// exists, Jellyfin's <c>HasChanged</c> gate considers it unchanged and will not regenerate
+    /// it). When true (a library being re-enabled after the empty period) the cover is
+    /// force-regenerated from the current items, so the empty→refill cycle doesn't leave a
+    /// stale collage of the previous leaving set.
+    /// </remarks>
+    /// <param name="libraryName">The leaving-soon library name.</param>
+    /// <param name="forceRefresh">Whether to regenerate the cover even when one already exists
+    /// (re-enable after empty), bypassing the image refresh gate.</param>
+    /// <param name="timeout">How long to wait for the scan to index items with images.</param>
+    /// <param name="cancellationToken">Cancellation token (e.g. from the sync), so a cancelled
+    /// sync can abort the wait instead of holding the lock until the timeout elapses.</param>
+    /// <returns>A task representing the operation.</returns>
+    public async Task RefreshLibraryImageAsync(
+        string libraryName,
+        bool forceRefresh,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var virtualFolder = GetVirtualFolder(libraryName);
+            if (virtualFolder == null || !Guid.TryParse(virtualFolder.ItemId, out var itemId))
+            {
+                _logger.LogDebug("Virtual folder {Name} not found; skipping cover refresh", libraryName);
+                return;
+            }
+
+            var collectionFolder = _libraryManager.GetItemById<CollectionFolder>(itemId);
+            if (collectionFolder == null)
+            {
+                _logger.LogDebug("Collection folder {ItemId} for {Name} not found; skipping cover refresh", itemId, libraryName);
+                return;
+            }
+
+            // The dynamic collage only needs regenerating while the cover is still missing —
+            // unless the caller forces it (re-enable after empty: the stale collage shows the
+            // previous leaving set, which is the wrong cover for a churn-driven library).
+            if (!forceRefresh && collectionFolder.HasImage(ImageType.Primary, 0))
+            {
+                _logger.LogDebug("Virtual folder {Name} already has a cover; skipping cover refresh", libraryName);
+                return;
+            }
+
+            // Wait for the scan to index items with images. Bounded: if the initial scan of a
+            // large library is slow, skip this run — the next sync finds the items already
+            // indexed and generates the cover then.
+            var itemsIndexed = await WaitForConditionAsync(
+                    () => HasIndexedItemsWithImages(collectionFolder),
+                    timeout,
+                    TimeSpan.FromSeconds(1),
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!itemsIndexed)
+            {
+                _logger.LogWarning(
+                    "Timed out waiting for {Name} to index items with images; cover will be generated by a later sync",
+                    libraryName);
+                return;
+            }
+
+            if (forceRefresh)
+            {
+                // Regenerate the collage from the current leaving set. The image gate is
+                // separate from the metadata gate: MetadataRefreshMode.FullRefresh only forces
+                // metadata providers, while image providers run when ImageRefreshMode is
+                // FullRefresh (which also marks the primary image as replaced so the old
+                // collage file is overwritten). An existing collage otherwise never regenerates
+                // (its stored DateModified always matches the file mtime).
+                _logger.LogInformation("Forcing cover regeneration for {Name}", libraryName);
+                await collectionFolder
+                    .RefreshMetadata(
+                        new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+                        {
+                            MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
+                            ImageRefreshMode = MetadataRefreshMode.FullRefresh,
+                            ReplaceAllImages = true,
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogInformation("Refreshing {Name} metadata so its cover collage regenerates", libraryName);
+                collectionFolder.ChangedExternally();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Cover regeneration is best-effort housekeeping; it must never break the sync
+            // or the library re-enable that follows it.
+            _logger.LogWarning(ex, "Failed to refresh cover for {Name}", libraryName);
+        }
+    }
+
+    /// <summary>
     /// Determines whether a virtual-folder location points under the directory this plugin
     /// manages (the base path by sub-directory). Used as the ownership guard before any
     /// destructive removal: a plugin-created library always holds a location under this
@@ -311,5 +448,76 @@ public class VirtualFolderManager
 
         // Ensure a real path-boundary match: <owned>/x belongs, <owned>-sibling does not.
         return location.Length == ownedPath.Length || location[ownedPath.Length] == Path.DirectorySeparatorChar;
+    }
+
+    /// <summary>
+    /// Polls <paramref name="condition"/> until it returns true, <paramref name="timeout"/>
+    /// elapses, or the token is cancelled. Used to wait for the library scan to index items
+    /// without blocking indefinitely.
+    /// </summary>
+    /// <param name="condition">The condition to poll.</param>
+    /// <param name="timeout">Total time budget.</param>
+    /// <param name="pollInterval">Delay between polls.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>True when the condition became true within the budget, otherwise false.</returns>
+    internal static async Task<bool> WaitForConditionAsync(
+        Func<bool> condition,
+        TimeSpan timeout,
+        TimeSpan pollInterval,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (!condition())
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                return false;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the item kinds a <c>CollectionFolderImageProvider</c> cover collage draws
+    /// from for a given collection type. Mirrors the provider's own switch so the "has items
+    /// with images" precondition uses the same item set the collage will use.
+    /// </summary>
+    /// <param name="collectionType">The collection folder's collection type.</param>
+    /// <returns>The item kinds whose primary images feed the collage.</returns>
+    internal static BaseItemKind[] GetIncludeItemTypes(CollectionType? collectionType)
+    {
+        // The plugin only creates movies and tvshows libraries (see
+        // EnsureVirtualFolderAsync); the provider's other collection types are not reachable.
+        return collectionType switch
+        {
+            CollectionType.movies => [BaseItemKind.Movie],
+            CollectionType.tvshows => [BaseItemKind.Series],
+            _ => [BaseItemKind.Video, BaseItemKind.Audio, BaseItemKind.Photo, BaseItemKind.Movie, BaseItemKind.Series],
+        };
+    }
+
+    /// <summary>
+    /// Determines whether the collection folder already indexes at least one item with a
+    /// primary image — the precondition for <c>CollectionFolderImageProvider</c> to build a
+    /// cover collage. Mirrors the provider's own query (recursive, matching item kinds,
+    /// items with primary images).
+    /// </summary>
+    /// <param name="collectionFolder">The collection folder.</param>
+    /// <returns>True when at least one indexed item has a primary image.</returns>
+    private static bool HasIndexedItemsWithImages(CollectionFolder collectionFolder)
+    {
+        return collectionFolder.GetItemList(new InternalItemsQuery
+        {
+            CollapseBoxSetItems = false,
+            Recursive = true,
+            DtoOptions = new DtoOptions(false),
+            ImageTypes = [ImageType.Primary],
+            IncludeItemTypes = GetIncludeItemTypes(collectionFolder.CollectionType),
+            Limit = 1,
+        }).Count > 0;
     }
 }
