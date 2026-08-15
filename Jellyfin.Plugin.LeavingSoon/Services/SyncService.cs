@@ -269,6 +269,10 @@ public class SyncService : IScheduledTask
             if (!config.HideWhenEmpty)
             {
                 _logger.LogDebug("Library {Name} is empty but hide_when_empty is false, leaving it", libraryName);
+
+                // Deliberately do not touch visibility here: forcing a re-enable would override an
+                // admin's manual dashboard disable. A library disabled while empty only comes back
+                // when items arrive again on a later sync.
                 return;
             }
 
@@ -290,10 +294,6 @@ public class SyncService : IScheduledTask
         var (_, needsInitialScan) = await _virtualFolderManager
             .EnsureVirtualFolderAsync(libraryName, collectionType, symlinkDir)
             .ConfigureAwait(false);
-
-        // A library disabled while empty must be brought back before the content refresh,
-        // or it stays hidden even after the scan.
-        await _virtualFolderManager.SetLibraryEnabledAsync(libraryName, true).ConfigureAwait(false);
 
         // Create symlinks for items that are not yet linked.
         var desired = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -353,6 +353,11 @@ public class SyncService : IScheduledTask
         {
             _virtualFolderManager.QuickRefreshPath(symlinkDir);
         }
+
+        // Bring the library back last, after the symlinks are reconciled and the refresh
+        // is scheduled, so what surfaces to users is the current leaving-soon set — not the
+        // retained (possibly stale) links from before it was disabled.
+        await _virtualFolderManager.SetLibraryEnabledAsync(libraryName, true).ConfigureAwait(false);
     }
 
     private string? ResolvePath(LeavingSoonItem item)

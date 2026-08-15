@@ -121,16 +121,28 @@ public class VirtualFolderManager
             return Task.CompletedTask;
         }
 
-        var options = folder.GetLibraryOptions();
-        if (options.Enabled == enabled)
+        try
         {
-            _logger.LogDebug("Virtual folder {Name} is already {State}", name, enabled ? "enabled" : "disabled");
-            return Task.CompletedTask;
+            var options = folder.GetLibraryOptions();
+            if (options.Enabled == enabled)
+            {
+                _logger.LogDebug("Virtual folder {Name} is already {State}", name, enabled ? "enabled" : "disabled");
+                return Task.CompletedTask;
+            }
+
+            options.Enabled = enabled;
+            folder.UpdateLibraryOptions(options);
+            _logger.LogInformation("Virtual folder {Name} {State}", name, enabled ? "enabled" : "disabled");
+        }
+        catch (Exception ex)
+        {
+            // Never let a toggle failure abort the sync run. CollectionFolder.SaveLibraryOptions
+            // applies the in-memory options first, so a failed options.xml write still takes effect
+            // for the running server; the change reverts after a restart, and the next sync then
+            // re-applies it (the reloaded cached value no longer matches).
+            _logger.LogWarning(ex, "Failed to {Action} virtual folder {Name}", enabled ? "enable" : "disable", name);
         }
 
-        options.Enabled = enabled;
-        folder.UpdateLibraryOptions(options);
-        _logger.LogInformation("Virtual folder {Name} {State}", name, enabled ? "enabled" : "disabled");
         return Task.CompletedTask;
     }
 
