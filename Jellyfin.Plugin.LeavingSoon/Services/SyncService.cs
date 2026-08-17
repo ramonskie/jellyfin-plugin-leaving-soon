@@ -34,6 +34,7 @@ public class SyncService : IScheduledTask
     private readonly ProviderRegistry _providerRegistry;
     private readonly SymlinkManager _symlinkManager;
     private readonly VirtualFolderManager _virtualFolderManager;
+    private readonly ItemImageSync _itemImageSync;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<SyncService> _logger;
 
@@ -49,18 +50,21 @@ public class SyncService : IScheduledTask
     /// <param name="providerRegistry">The provider registry.</param>
     /// <param name="symlinkManager">The symlink manager.</param>
     /// <param name="virtualFolderManager">The virtual folder manager.</param>
+    /// <param name="itemImageSync">The item image sync (shares originals' primary images).</param>
     /// <param name="libraryManager">The library manager (for path resolution).</param>
     /// <param name="logger">The logger.</param>
     public SyncService(
         ProviderRegistry providerRegistry,
         SymlinkManager symlinkManager,
         VirtualFolderManager virtualFolderManager,
+        ItemImageSync itemImageSync,
         ILibraryManager libraryManager,
         ILogger<SyncService> logger)
     {
         _providerRegistry = providerRegistry;
         _symlinkManager = symlinkManager;
         _virtualFolderManager = virtualFolderManager;
+        _itemImageSync = itemImageSync;
         _libraryManager = libraryManager;
         _logger = logger;
     }
@@ -382,6 +386,22 @@ public class SyncService : IScheduledTask
         await _virtualFolderManager
             .RefreshLibraryImageAsync(libraryName, forceRefresh, timeout, cancellationToken)
             .ConfigureAwait(false);
+
+        // Point each leaving-soon copy's primary image at its original's primary image file,
+        // so the library shows the exact same covers as the originals (including Maintainerr
+        // overlays). Runs after the refresh so the copies are usually indexed; a copy that is
+        // not indexed yet is skipped and picked up by the next poll. Best-effort: failures
+        // are logged inside the helper and never fail the sync.
+        try
+        {
+            await _itemImageSync
+                .ShareOriginalItemImagesAsync(items, symlinkDir, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to share original item images for library {Name}", libraryName);
+        }
 
         // Bring the library back last, after the symlinks are reconciled and the refresh
         // is scheduled, so what surfaces to users is the current leaving-soon set — not the

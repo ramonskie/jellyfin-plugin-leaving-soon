@@ -20,6 +20,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 
         serviceCollection.AddSingleton<SymlinkManager>();
         serviceCollection.AddSingleton<VirtualFolderManager>();
+        serviceCollection.AddSingleton<ItemImageSync>();
         serviceCollection.AddSingleton<ProviderRegistry>();
         serviceCollection.AddSingleton<SyncService>();
     }
